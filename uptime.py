@@ -13,6 +13,10 @@ import backscatter
 import logging
 import os
 import sys
+
+import sqlite3
+import numpy as np
+
 from datetime import datetime as dt
 
 logging.basicConfig(level=logging.INFO)
@@ -89,11 +93,123 @@ def has_positive_nave(dics):
             return False
     return True 
 
+def two_pad(num):
+    """ 
+    Takes in a number of 1 or 2 digits, returns a string of two digits. 
+    """
+    assert isinstance(num,int)
+    assert (num < 100 and num >= 0)
+    return "0" + str(num) if str(num).__len__() == 1 else str(num)
+
+def start_db(dbname="superdarntimes.sqlite"):
+    """
+    (Re)creates a database for storing experiment metadata parsed from 
+    rawacf files.
+
+    Entries in the Experiments Table have the following fields:
+    - stid (station ID) : 
+    - start_date : date of the start of the .rawacf entry
+    - start_time : time of day of the start of the .rawacf entry
+    - end_date : date of the end of the .rawacf entry
+    - end_time : time of day of the end of the .rawacf entry
+    - cpid : Control program ID number
+    - cmd_name : program name that was called to create this .rawacf 
+                file (note: CPIDs and cmd_names should match eachother)
+    - cmd_args : string containing the command-line args supplied when
+                running this command
+    - nave_positive : boolean flag stating whether or not the 'n_ave'
+                    parameter in the .rawacf file is consistently 
+                    positive (if it were 0 or -, there'd be an issue)
+    - times_consistent : boolean flag stating that the time difference
+                        between entries in the .rawacf are small and 
+                        consistent (if not, there was downtime during)
+
+    *** nave_positive and times_consistent are currently stored as strings
+    expected to only take on values of "True" or "False" ***
+    """
+    logging.info("Starting up the sqlite db...")
+    conn = sqlite3.connect(dbname)
+    cur = conn.cursor()
+    
+    cur.executescript("""
+    DROP TABLE IF EXISTS exps;
+    
+    CREATE TABLE IF NOT EXISTS exps (
+    stid integer NOT NULL,
+    start_date text NOT NULL,
+    start_time text NOT NULL, 
+    end_date text NOT NULL,
+    end_time text NOT NULL,
+    cpid integer NOT NULL,
+    cmd_name text NOT NULL,
+    cmd_args text,
+    nave_positive BOOLEAN,
+    times_consistent BOOLEAN,
+    PRIMARY KEY (stid, start_date, start_time)
+    );
+    """) 
+    return cur
+
+def process_experiment(dics, cur):
+    """
+    Takes a dmap-based list of dicts 'dics' for a SuperDARN experiment
+    and enters the key statistics for the experiment into the sqlite
+    database pointed to by cursor 'cur'
+    """
+    # Parse the <theoretically> constant parameters for the experiment
+    stid = process_field(dics, 'stid')
+    cpid = process_field(dics, 'cp')
+    cmd = process_field(dics, 'origin.command')
+    cmd_name = cmd.split(' ',1)[0]
+    cmd_args = cmd.split(' ',1)[1]
+
+    # Parse the start/end temporal fields 
+    t0 = reconstruct_datetime(dics[0])
+    start_date = str(t0.year) + two_pad(t0.month) + two_pad(t0.day) 
+    start_time = two_pad(t0.hour) + "h" + two_pad(t0.minute) + "m" + two_pad(t0.second) + "s"
+    tf = reconstruct_datetime(dics[-1])
+    end_date = str(tf.year) + two_pad(tf.month) + two_pad(tf.day) 
+    end_time = two_pad(tf.hour) + "h" + two_pad(tf.minute) + "m" + two_pad(tf.second) + "s"
+
+    # Check for unusual N_ave values
+    nave_positive = has_positive_nave(dics)
+    print nave_positive 
+
+    # Check for downtime during the experiment's run
+    ts = []
+    for d in dics:
+        ts.append(reconstruct_datetime(d))
+    diffs = [(ts[i+1] - ts[i]).seconds for i in range( len(ts) - 1 )]
+    # Check that every difference between entries is 20 seconds or less
+    times_consistent = ( np.array(diffs) < 20 ).all() 
+
+    logging.info("Record results: up from {0} to {1}".format(t0, tf))
+    logging.info("CPID: {0}\t Origin Command: {1}\t Nave status: {2} \
+                    \t Consistent Times: {3}".format(cpid, cmd, 
+                    nave_positive,times_consistent))
+
+    # Perform the SQL insertion
+    cur.execute('''INSERT INTO exps (stid, start_date, start_time, end_date, 
+                end_time, cpid, cmd_name, cmd_args, nave_positive, 
+                times_consistent)  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (stid, start_date, start_time, end_date, end_time, cpid, 
+                cmd_name, cmd_args, int(nave_positive), int(times_consistent)))
+    print("Entered that shit!")
+
+def dump_db(cur):
+    """
+    Shows all the entries in the DB
+    """
+    cur.execute('''select * from exps''')
+    print cur.fetchall()
+
 if __name__ == "__main__":
+    # If we've been given 
     if len(sys.argv) > 1:
         path = sys.argv[1]
         if os.path.isdir(path):
             logging.info("Acceptable path. Analysis proceeding...")
+            cur = start_db()
             for fil in os.listdir(path):
                 logging.info("File {0}:".format(fil)) 
                 if fil[-4:] == '.bz2':
@@ -105,11 +221,6 @@ if __name__ == "__main__":
                     logging.info('File not used for dmap records.')
                     continue
                 # If it was a bz2 or rawacf, now we do scripty stuff with dict
-                t0 = reconstruct_datetime(dics[0])
-                tf = reconstruct_datetime(dics[-1])
-                cmd = process_field(dics, 'origin.command')
-                cpid = process_field(dics, 'cp')
-                nave_good = has_positive_nave(dics)
-                logging.info("Record results: up from {0} to {1}".format(t0, tf))
-                logging.info("CPID: {0}\t Origin Command: {1}\t Nave status: {2}".format(cpid, cmd, nave_good))
+                process_experiment(dics, cur)
 
+    dump_db(cur)

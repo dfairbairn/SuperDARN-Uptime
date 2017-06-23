@@ -32,6 +32,106 @@ class InconsistentDmapFieldError(Exception):
     """
     pass
 
+class RawacfRecord(object):
+    """
+    Class for containing a SuperDARN experiment record. Acquired by 
+    parsing .rawacf files or from the sqlite database used in this 
+    script.
+    """
+    def __init__(self, stid, start_date, start_time, end_date, end_time, cpid,
+                 cmd_name, cmd_args, nave_pos, times_consistent):
+        self.stid = stid
+        self.start_date = start_date
+        self.start_time = start_time
+        self.end_date = end_date
+        self.end_time = end_time
+        self.cpid = cpid
+        self.cmd_name = cmd_name
+        self.cmd_args = cmd_args 
+        self.nave_pos = nave_pos
+        self.times_consistent = times_consistent
+
+    def __repr__(self):
+        """
+        How to spit out this thing's internals.
+        """
+        t0 = self.start_date + self.start_time
+        tf = self.end_date + self.end_time
+        cmd = self.cmd_name + " " + self.cmd_args
+        string = "Record: from {0} to {1}\tCPID: {2}\n".format(t0, tf, self.cpid)
+        string += "Origin Cmd: {0}\tNave status: {1}".format(cmd, self.nave_pos)
+        string += "\tConsistent dT: {0}".format(self.times_consistent)
+        return string
+
+    def save_to_db(self, cur):
+        """
+        Takes a cursor for an sqlite database and saves the object's 
+        fields to the database
+        """
+        cur.execute('''INSERT INTO exps (stid, start_date, start_time, end_date, 
+        end_time, cpid, cmd_name, cmd_args, nave_pos, 
+        times_consistent)  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (self.stid, self.start_date, self.start_time, self.end_date, 
+        self.end_time, self.cpid, self.cmd_name, self.cmd_args, 
+        int(self.nave_pos), int(self.times_consistent)))
+
+    # Class method to read a tuple from the sqlite db and make a RawacfRecord
+    @classmethod
+    def record_from_tuple(cls, tup):
+        """
+        Creates and returns a RawacfRecord object constructed from the 
+        contents of tuple 'tup' which is assumed to have been fetched 
+        from the **SQLITE DB**
+        """
+        assert(len(tup) == 10)
+        # Other tests to do?
+        assert(tup[0] != None and tup[1] != None and tup[2] != None)
+        # Use contents of tuple as arguments for RawacfRecord constructor
+        return cls(*tup)
+
+    # Class method for making a RawacfRecord from a dicts from a .rawacf file
+    @classmethod
+    def record_from_dics(cls, dics):
+        """
+        Creates and returns a RawacfRecord object constructed from the 
+        contents of a list of dictionaries that originates from parsing
+        a **RAWACF FILE***
+        """ 
+        assert(type(dics)==list)
+        assert(type(dics[0]==dict))
+        assert(len(dics)>1) 
+        # Parse the <theoretically> constant parameters for the experiment
+        stid = process_field(dics, 'stid')
+        cpid = process_field(dics, 'cp')
+        cmd = process_field(dics, 'origin.command')
+        cmd_name = cmd.split(' ',1)[0]
+        cmd_args = cmd.split(' ',1)[1]
+    
+        # Parse the start/end temporal fields 
+        t0 = reconstruct_datetime(dics[0])
+        start_date = str(t0.year) + two_pad(t0.month) + two_pad(t0.day) 
+        start_time = two_pad(t0.hour) + "h" + two_pad(t0.minute) + "m" + \
+                    two_pad(t0.second) + "s"
+        tf = reconstruct_datetime(dics[-1])
+        end_date = str(tf.year) + two_pad(tf.month) + two_pad(tf.day) 
+        end_time = two_pad(tf.hour) + "h" + two_pad(tf.minute) + "m" + \
+                    two_pad(tf.second) + "s"
+    
+        # Check for unusual N_ave values
+        nave_pos = has_positive_nave(dics)
+        print nave_pos
+    
+        # Check for downtime during the experiment's run
+        ts = []
+        for d in dics:
+            ts.append(reconstruct_datetime(d))
+        diffs = [(ts[i+1] - ts[i]).seconds for i in range( len(ts) - 1 )]
+        # Check that every difference between entries is 20 seconds or less
+        times_consistent = ( np.array(diffs) < 20 ).all() 
+        return cls(stid, start_date, start_time, end_date, end_time,
+                            cpid, cmd_name, cmd_args, nave_pos, 
+                            times_consistent)
+       
 def parse_rawacfs():
     """
     Takes the command-line argument provided to this program and if
@@ -77,7 +177,7 @@ def bz2_dic(fname):
     dics = backscatter.dmap.parse_dmap_format_from_stream(stream)
     return dics
 
-def acf_dic(fname):
+def acf_dic(fname):    # If we've been given 
     """ 
     Takes a .rawacf file and uses the backscatter library to retrieve 
     a dictionary of a dmap object parsed from its contents
@@ -153,14 +253,14 @@ def start_db(dbname="superdarntimes.sqlite"):
                 file (note: CPIDs and cmd_names should match eachother)
     - cmd_args : string containing the command-line args supplied when
                 running this command
-    - nave_positive : boolean flag stating whether or not the 'n_ave'
+    - nave_pos : boolean flag stating whether or not the 'n_ave'
                     parameter in the .rawacf file is consistently 
                     positive (if it were 0 or -, there'd be an issue)
     - times_consistent : boolean flag stating that the time difference
                         between entries in the .rawacf are small and 
                         consistent (if not, there was downtime during)
 
-    *** nave_positive and times_consistent are currently stored as strings
+    *** nave_pos and times_consistent are currently stored as strings
     expected to only take on values of "True" or "False" ***
     """
     logging.info("Starting up the sqlite db...")
@@ -179,7 +279,7 @@ def start_db(dbname="superdarntimes.sqlite"):
     cpid integer NOT NULL,
     cmd_name text NOT NULL,
     cmd_args text,
-    nave_positive BOOLEAN,
+    nave_pos BOOLEAN,
     times_consistent BOOLEAN,
     PRIMARY KEY (stid, start_date, start_time)
     );
@@ -192,63 +292,22 @@ def process_experiment(dics, cur):
     and enters the key statistics for the experiment into the sqlite
     database pointed to by cursor 'cur'
     """
-    # Parse the <theoretically> constant parameters for the experiment
-    stid = process_field(dics, 'stid')
-    cpid = process_field(dics, 'cp')
-    cmd = process_field(dics, 'origin.command')
-    cmd_name = cmd.split(' ',1)[0]
-    cmd_args = cmd.split(' ',1)[1]
-
-    # Parse the start/end temporal fields 
-    t0 = reconstruct_datetime(dics[0])
-    start_date = str(t0.year) + two_pad(t0.month) + two_pad(t0.day) 
-    start_time = two_pad(t0.hour) + "h" + two_pad(t0.minute) + "m" + two_pad(t0.second) + "s"
-    tf = reconstruct_datetime(dics[-1])
-    end_date = str(tf.year) + two_pad(tf.month) + two_pad(tf.day) 
-    end_time = two_pad(tf.hour) + "h" + two_pad(tf.minute) + "m" + two_pad(tf.second) + "s"
-
-    # Check for unusual N_ave values
-    nave_positive = has_positive_nave(dics)
-    print nave_positive 
-
-    # Check for downtime during the experiment's run
-    ts = []
-    for d in dics:
-        ts.append(reconstruct_datetime(d))
-    diffs = [(ts[i+1] - ts[i]).seconds for i in range( len(ts) - 1 )]
-    # Check that every difference between entries is 20 seconds or less
-    times_consistent = ( np.array(diffs) < 20 ).all() 
-
-    logging.info("Record: from {0} to {1}\tCPID: {2}".format(t0, tf, cpid))
-    logging.info("Origin Cmd: {1}\tNave status: {2}\tConsistent dT: {3}".format(cpid, cmd, 
-                    nave_positive,times_consistent))
-
-    # Perform the SQL insertion
-    cur.execute('''INSERT INTO exps (stid, start_date, start_time, end_date, 
-                end_time, cpid, cmd_name, cmd_args, nave_positive, 
-                times_consistent)  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                (stid, start_date, start_time, end_date, end_time, cpid, 
-                cmd_name, cmd_args, int(nave_positive), int(times_consistent)))
-    print("Entered that shit!")
+    r = RawacfRecord.record_from_dics(dics)
+    r.save_to_db(cur)
+    return r
 
 def select_exps(sql_select):
     """
     Takes an sql query to select certain experiments, returns the list
-    of experiment objects
+    of RawacfRecord objects
     """
     cur.execute(sql_select)
     entries = cur.fetchall()
+    records = []
     for entry in entries:
         # Do construction of experiment object from SQL output
-        pass 
-    return
-
-def extract_dict(exp_entry):
-    """
-
-    """
-    # Take the tuple that comes from an sql fetch, store it in Experiment obj
-    return
+        records.append(RawacfRecord.record_from_tuple(entry))
+    return records
 
 def dump_db(cur):
     """
@@ -258,4 +317,39 @@ def dump_db(cur):
     print cur.fetchall()
 
 if __name__ == "__main__":
-    parse_rawacfs()
+    # parse_rawacfs()
+    
+    
+    if len(sys.argv) > 1:
+        path = sys.argv[1]
+        if os.path.isdir(path):
+            logging.info("Acceptable path. Analysis proceeding...")
+            cur = start_db()
+            for fil in os.listdir(path):
+                logging.info("File {0}:".format(fil)) 
+                if fil[-4:] == '.bz2':
+                    dics = bz2_dic(path+'/'+fil)
+                elif fil[-7:] == '.rawacf':
+                    dics = acf_dic(path+'/'+fil)
+                else:
+                    # Could do something with these too?
+                    logging.info('File not used for dmap records.')
+                    continue
+                # If it was a bz2 or rawacf, now we do scripty stuff with dict
+                process_experiment(dics, cur)
+
+    cur.execute('select * from exps')
+    tup = cur.fetchall()[0]
+
+    # Test RawacfRecord's class method constructors
+    r1 = RawacfRecord.record_from_dics(dics)
+    r2 = RawacfRecord.record_from_tuple(tup)
+    
+    r2.stid = 90
+    r2.start_time = "45h23m32s"
+    # Test RawacfRecord's save_to_db()
+    r2.save_to_db(cur)
+    # Test __repr__()
+    print(r2)
+
+    dump_db(cur)

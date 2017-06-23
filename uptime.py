@@ -8,8 +8,7 @@ author: David Fairbairn
 date: June 20 2017
 
 """
-
-import backscatter
+import backscatter 
 import logging
 import os
 import sys
@@ -21,14 +20,11 @@ from datetime import datetime as dt
 
 logging.basicConfig(level=logging.INFO)
 
-# -----------------------------------------------------------------------------
-#                           UPTIME SCRIPT FUNCTIONS
-# -----------------------------------------------------------------------------
-
-class InconsistentDmapFieldError(Exception):
+class BadRawacfDataError(Exception):
     """
-    Raised when a field which should be constant (e.g. origin cmd) is
-    inconsistent throughout a rawacf record.
+    Raised when data from a rawacf file is inconsistent or incorrectly
+    formatted, e.g. when a field which should be constant (e.g. origin 
+    cmd) is inconsistent throughout a record.
     """
     pass
 
@@ -37,6 +33,26 @@ class RawacfRecord(object):
     Class for containing a SuperDARN experiment record. Acquired by 
     parsing .rawacf files or from the sqlite database used in this 
     script.
+
+    *** FIELDS ***
+        - stid (station ID) : number corresponding to which array it is
+        - start_date : date of the start of the .rawacf entry
+        - start_time : time of day of the start of the .rawacf entry
+        - end_date : date of the end of the .rawacf entry
+        - end_time : time of day of the end of the .rawacf entry
+        - cpid : Control program ID number
+        - cmd_name : program name that was called to create this .rawacf 
+                file (note: CPIDs and cmd_names should match eachother)
+        - cmd_args : string containing the command-line args supplied when
+                    running this command
+        - nave_pos : boolean flag stating whether or not the 'n_ave'
+                        parameter in the .rawacf file is consistently 
+                        positive (if it were 0 or -, there'd be an issue)
+        - times_consistent : boolean flag stating that the time difference
+                        between entries in the .rawacf are small and 
+                        consistent (if not, there was downtime during)
+
+
     """
     def __init__(self, stid, start_date, start_time, end_date, end_time, cpid,
                  cmd_name, cmd_args, nave_pos, times_consistent):
@@ -50,18 +66,27 @@ class RawacfRecord(object):
         self.cmd_args = cmd_args 
         self.nave_pos = nave_pos
         self.times_consistent = times_consistent
+        self.st_hr, self.st_mt, self.st_sc = map(int, (self.start_time).split(':'))
+        self.start_t_s = self.st_hr*3600 + self.st_mt*60 + self.st_sc
 
     def __repr__(self):
         """
         How to spit out this thing's internals.
         """
-        t0 = self.start_date + self.start_time
-        tf = self.end_date + self.end_time
+        t0 = self.start_date + " " + self.start_time
+        tf = self.end_date + " " + self.end_time
         cmd = self.cmd_name + " " + self.cmd_args
         string = "Record: from {0} to {1}\tCPID: {2}\n".format(t0, tf, self.cpid)
         string += "Origin Cmd: {0}\tNave status: {1}".format(cmd, self.nave_pos)
         string += "\tConsistent dT: {0}".format(self.times_consistent)
         return string
+
+    def duration(self):
+        """
+        Computes the duration of the experiment in the record.
+        """
+        # Take datetime difference of end_time and start_time?
+        return
 
     def save_to_db(self, cur):
         """
@@ -110,15 +135,15 @@ class RawacfRecord(object):
         # Parse the start/end temporal fields 
         t0 = reconstruct_datetime(dics[0])
         start_date = str(t0.year) + two_pad(t0.month) + two_pad(t0.day) 
-        start_time = two_pad(t0.hour) + "h" + two_pad(t0.minute) + "m" + \
-                    two_pad(t0.second) + "s"
+        start_time = two_pad(t0.hour) + ":" + two_pad(t0.minute) + ":" + \
+                    two_pad(t0.second)
         tf = reconstruct_datetime(dics[-1])
         end_date = str(tf.year) + two_pad(tf.month) + two_pad(tf.day) 
-        end_time = two_pad(tf.hour) + "h" + two_pad(tf.minute) + "m" + \
-                    two_pad(tf.second) + "s"
+        end_time = two_pad(tf.hour) + ":" + two_pad(tf.minute) + ":" + \
+                    two_pad(tf.second)
     
         # Check for unusual N_ave values
-        nave_pos = has_positive_nave(dics)
+        nave_pos = int(has_positive_nave(dics))
         print nave_pos
     
         # Check for downtime during the experiment's run
@@ -126,38 +151,26 @@ class RawacfRecord(object):
         for d in dics:
             ts.append(reconstruct_datetime(d))
         diffs = [(ts[i+1] - ts[i]).seconds for i in range( len(ts) - 1 )]
+        # logging.info(diffs)
         # Check that every difference between entries is 20 seconds or less
         times_consistent = ( np.array(diffs) < 20 ).all() 
         return cls(stid, start_date, start_time, end_date, end_time,
                             cpid, cmd_name, cmd_args, nave_pos, 
                             times_consistent)
-       
+
+# -----------------------------------------------------------------------------
+#                           UPTIME SCRIPT FUNCTIONS
+# -----------------------------------------------------------------------------
+
+      
 def parse_rawacfs():
     """
     Takes the command-line argument provided to this program and if
     valid, treats it as a path to a trove of .rawacf files, parses them
     and inserts them into a database.
     """
-    # If we've been given 
-    if len(sys.argv) > 1:
-        path = sys.argv[1]
-        if os.path.isdir(path):
-            logging.info("Acceptable path. Analysis proceeding...")
-            cur = start_db()
-            for fil in os.listdir(path):
-                logging.info("File {0}:".format(fil)) 
-                if fil[-4:] == '.bz2':
-                    dics = bz2_dic(path+'/'+fil)
-                elif fil[-7:] == '.rawacf':
-                    dics = acf_dic(path+'/'+fil)
-                else:
-                    # Could do something with these too?
-                    logging.info('File not used for dmap records.')
-                    continue
-                # If it was a bz2 or rawacf, now we do scripty stuff with dict
-                process_experiment(dics, cur)
-
-    dump_db(cur)   
+    # For now just leave this empty; the stuff in if-main will go here
+    pass
 
 def bz2_dic(fname):
     """ 
@@ -316,6 +329,37 @@ def dump_db(cur):
     cur.execute('''select * from exps''')
     print cur.fetchall()
 
+# -----------------------------------------------------------------------------
+#                           POST PROCESSING METHODS
+# -----------------------------------------------------------------------------
+def stats_day(date_str, cur):
+    """
+    
+    """
+    import heapq
+    sql = 'select * from exps where start_date regexp "%s" or end_date regexp "%s"'
+    schedule = []
+    rec_keys = dict()
+    recs = select_exps(sql)
+    for r in recs:
+        rec_keys[r.start_t_s] = r
+        if r.start_date != date_str:
+            heapq.heappush(schedule, 0.)
+        else: 
+            heapq.heappush(schedule, r.start_t_s)
+    # Now we have a sorted list of the rawacf records for this day
+    durations = []
+    for start_t_s in [heappop(schedule) for i in range(len(schedule))]:
+        r = rec_keys[start_t_s]
+        if start_t_s == 0:
+            #durations.append(r.end_time)
+            pass
+        else:
+            pass
+            #durations.append(r.end_time - r.start_time)
+    # sum the intervals in durations and divide by 24hr*3600s/hr
+    return
+
 if __name__ == "__main__":
     # parse_rawacfs()
     
@@ -346,7 +390,7 @@ if __name__ == "__main__":
     r2 = RawacfRecord.record_from_tuple(tup)
     
     r2.stid = 90
-    r2.start_time = "45h23m32s"
+    r2.start_time = "05:23:32"
     # Test RawacfRecord's save_to_db()
     r2.save_to_db(cur)
     # Test __repr__()

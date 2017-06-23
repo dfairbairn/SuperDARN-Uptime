@@ -21,12 +21,43 @@ from datetime import datetime as dt
 
 logging.basicConfig(level=logging.INFO)
 
+# -----------------------------------------------------------------------------
+#                           UPTIME SCRIPT FUNCTIONS
+# -----------------------------------------------------------------------------
+
 class InconsistentDmapFieldError(Exception):
     """
     Raised when a field which should be constant (e.g. origin cmd) is
     inconsistent throughout a rawacf record.
     """
     pass
+
+def parse_rawacfs():
+    """
+    Takes the command-line argument provided to this program and if
+    valid, treats it as a path to a trove of .rawacf files, parses them
+    and inserts them into a database.
+    """
+    # If we've been given 
+    if len(sys.argv) > 1:
+        path = sys.argv[1]
+        if os.path.isdir(path):
+            logging.info("Acceptable path. Analysis proceeding...")
+            cur = start_db()
+            for fil in os.listdir(path):
+                logging.info("File {0}:".format(fil)) 
+                if fil[-4:] == '.bz2':
+                    dics = bz2_dic(path+'/'+fil)
+                elif fil[-7:] == '.rawacf':
+                    dics = acf_dic(path+'/'+fil)
+                else:
+                    # Could do something with these too?
+                    logging.info('File not used for dmap records.')
+                    continue
+                # If it was a bz2 or rawacf, now we do scripty stuff with dict
+                process_experiment(dics, cur)
+
+    dump_db(cur)   
 
 def bz2_dic(fname):
     """ 
@@ -100,6 +131,11 @@ def two_pad(num):
     assert isinstance(num,int)
     assert (num < 100 and num >= 0)
     return "0" + str(num) if str(num).__len__() == 1 else str(num)
+
+
+# -----------------------------------------------------------------------------
+#                               DB FUNCTIONS
+# -----------------------------------------------------------------------------
 
 def start_db(dbname="superdarntimes.sqlite"):
     """
@@ -183,9 +219,8 @@ def process_experiment(dics, cur):
     # Check that every difference between entries is 20 seconds or less
     times_consistent = ( np.array(diffs) < 20 ).all() 
 
-    logging.info("Record results: up from {0} to {1}".format(t0, tf))
-    logging.info("CPID: {0}\t Origin Command: {1}\t Nave status: {2} \
-                    \t Consistent Times: {3}".format(cpid, cmd, 
+    logging.info("Record: from {0} to {1}\tCPID: {2}".format(t0, tf, cpid))
+    logging.info("Origin Cmd: {1}\tNave status: {2}\tConsistent dT: {3}".format(cpid, cmd, 
                     nave_positive,times_consistent))
 
     # Perform the SQL insertion
@@ -196,6 +231,25 @@ def process_experiment(dics, cur):
                 cmd_name, cmd_args, int(nave_positive), int(times_consistent)))
     print("Entered that shit!")
 
+def select_exps(sql_select):
+    """
+    Takes an sql query to select certain experiments, returns the list
+    of experiment objects
+    """
+    cur.execute(sql_select)
+    entries = cur.fetchall()
+    for entry in entries:
+        # Do construction of experiment object from SQL output
+        pass 
+    return
+
+def extract_dict(exp_entry):
+    """
+
+    """
+    # Take the tuple that comes from an sql fetch, store it in Experiment obj
+    return
+
 def dump_db(cur):
     """
     Shows all the entries in the DB
@@ -204,23 +258,4 @@ def dump_db(cur):
     print cur.fetchall()
 
 if __name__ == "__main__":
-    # If we've been given 
-    if len(sys.argv) > 1:
-        path = sys.argv[1]
-        if os.path.isdir(path):
-            logging.info("Acceptable path. Analysis proceeding...")
-            cur = start_db()
-            for fil in os.listdir(path):
-                logging.info("File {0}:".format(fil)) 
-                if fil[-4:] == '.bz2':
-                    dics = bz2_dic(path+'/'+fil)
-                elif fil[-7:] == '.rawacf':
-                    dics = acf_dic(path+'/'+fil)
-                else:
-                    # Could do something with these too?
-                    logging.info('File not used for dmap records.')
-                    continue
-                # If it was a bz2 or rawacf, now we do scripty stuff with dict
-                process_experiment(dics, cur)
-
-    dump_db(cur)
+    parse_rawacfs()

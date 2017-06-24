@@ -16,6 +16,7 @@ import sys
 import sqlite3
 import numpy as np
 
+import dateutil.parser
 from datetime import datetime as dt
 
 logging.basicConfig(level=logging.INFO)
@@ -36,10 +37,8 @@ class RawacfRecord(object):
 
     *** FIELDS ***
         - stid (station ID) : number corresponding to which array it is
-        - start_date : date of the start of the .rawacf entry
-        - start_time : time of day of the start of the .rawacf entry
-        - end_date : date of the end of the .rawacf entry
-        - end_time : time of day of the end of the .rawacf entry
+        - start_dt: time of the start of the .rawacf entry (datetime obj)
+        - end_dt : time of the end of the .rawacf entry (datetime obj)
         - cpid : Control program ID number
         - cmd_name : program name that was called to create this .rawacf 
                 file (note: CPIDs and cmd_names should match eachother)
@@ -54,27 +53,23 @@ class RawacfRecord(object):
 
 
     """
-    def __init__(self, stid, start_date, start_time, end_date, end_time, cpid,
+    def __init__(self, stid, start_dt, end_dt, cpid,
                  cmd_name, cmd_args, nave_pos, times_consistent):
+        self.start_dt = start_dt
+        self.end_dt = end_dt
         self.stid = stid
-        self.start_date = start_date
-        self.start_time = start_time
-        self.end_date = end_date
-        self.end_time = end_time
         self.cpid = cpid
         self.cmd_name = cmd_name
         self.cmd_args = cmd_args 
         self.nave_pos = nave_pos
         self.times_consistent = times_consistent
-        self.st_hr, self.st_mt, self.st_sc = map(int, (self.start_time).split(':'))
-        self.start_t_s = self.st_hr*3600 + self.st_mt*60 + self.st_sc
 
     def __repr__(self):
         """
         How to spit out this thing's internals.
         """
-        t0 = self.start_date + " " + self.start_time
-        tf = self.end_date + " " + self.end_time
+        t0 = self.start_dt.isoformat()
+        tf = self.end_dt.isoformat()
         cmd = self.cmd_name + " " + self.cmd_args
         string = "Record: from {0} to {1}\tCPID: {2}\n".format(t0, tf, self.cpid)
         string += "Origin Cmd: {0}\tNave status: {1}".format(cmd, self.nave_pos)
@@ -85,19 +80,22 @@ class RawacfRecord(object):
         """
         Computes the duration of the experiment in the record.
         """
-        # Take datetime difference of end_time and start_time?
-        return
+        # datetimes can be subtracted to get intervals
+        diff = end_dt - start_dt
+        return diff.total_seconds()
 
     def save_to_db(self, cur):
         """
         Takes a cursor for an sqlite database and saves the object's 
         fields to the database
         """
-        cur.execute('''INSERT INTO exps (stid, start_date, start_time, end_date, 
-        end_time, cpid, cmd_name, cmd_args, nave_pos, 
-        times_consistent)  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-        (self.stid, self.start_date, self.start_time, self.end_date, 
-        self.end_time, self.cpid, self.cmd_name, self.cmd_args, 
+        start_time = (self.start_dt).isoformat()
+        end_time = (self.end_dt).isoformat()
+        cur.execute('''INSERT INTO exps (stid, start_iso, end_iso, 
+        cpid, cmd_name, cmd_args, nave_pos, times_consistent) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+        (self.stid, start_time, end_time, 
+        self.cpid, self.cmd_name, self.cmd_args, 
         int(self.nave_pos), int(self.times_consistent)))
 
     # Class method to read a tuple from the sqlite db and make a RawacfRecord
@@ -106,13 +104,18 @@ class RawacfRecord(object):
         """
         Creates and returns a RawacfRecord object constructed from the 
         contents of tuple 'tup' which is assumed to have been fetched 
-        from the **SQLITE DB**
+        from the **SQLITE DB** (aka have the same order/structure as DB
+        entries have, see the DB section).
         """
-        assert(len(tup) == 10)
-        # Other tests to do?
+        assert(len(tup) == 8)
         assert(tup[0] != None and tup[1] != None and tup[2] != None)
+        stid, start_iso, end_iso, cpid = (tup[:4])
+        cmd_name, cmd_args, nave_pos, times_consistent = (tup[-4:])
+        start_dt = iso_to_dt(start_iso)
+        end_dt = iso_to_dt(end_iso)
         # Use contents of tuple as arguments for RawacfRecord constructor
-        return cls(*tup)
+        return cls(stid, start_dt, end_dt, cpid, cmd_name, cmd_args, 
+                nave_pos, times_consistent)
 
     # Class method for making a RawacfRecord from a dicts from a .rawacf file
     @classmethod
@@ -133,30 +136,23 @@ class RawacfRecord(object):
         cmd_args = cmd.split(' ',1)[1]
     
         # Parse the start/end temporal fields 
-        t0 = reconstruct_datetime(dics[0])
-        start_date = str(t0.year) + two_pad(t0.month) + two_pad(t0.day) 
-        start_time = two_pad(t0.hour) + ":" + two_pad(t0.minute) + ":" + \
-                    two_pad(t0.second)
-        tf = reconstruct_datetime(dics[-1])
-        end_date = str(tf.year) + two_pad(tf.month) + two_pad(tf.day) 
-        end_time = two_pad(tf.hour) + ":" + two_pad(tf.minute) + ":" + \
-                    two_pad(tf.second)
-    
+        start_dt = reconstruct_datetime(dics[0])
+        end_dt = reconstruct_datetime(dics[-1])
+        
         # Check for unusual N_ave values
         nave_pos = int(has_positive_nave(dics))
-        print nave_pos
     
         # Check for downtime during the experiment's run
         ts = []
         for d in dics:
             ts.append(reconstruct_datetime(d))
-        diffs = [(ts[i+1] - ts[i]).seconds for i in range( len(ts) - 1 )]
+        diffs = [(ts[i+1] - ts[i]).total_seconds() for i in range( len(ts) - 1 )]
         # logging.info(diffs)
+
         # Check that every difference between entries is 20 seconds or less
-        times_consistent = ( np.array(diffs) < 20 ).all() 
-        return cls(stid, start_date, start_time, end_date, end_time,
-                            cpid, cmd_name, cmd_args, nave_pos, 
-                            times_consistent)
+        times_consistent = int(( np.array(diffs) < 20 ).all())
+        return cls(stid, start_dt, end_dt, cpid, cmd_name, cmd_args, nave_pos, 
+                   times_consistent)
 
 # -----------------------------------------------------------------------------
 #                           UPTIME SCRIPT FUNCTIONS
@@ -225,7 +221,7 @@ def process_field(dics,field):
     val = dics[0][field]
     for i in dics:
         if i[field] != val:
-            raise InconsistentDmapFieldError 
+            raise BadRawacfDataError
     return val
 
 def has_positive_nave(dics):
@@ -245,6 +241,28 @@ def two_pad(num):
     assert (num < 100 and num >= 0)
     return "0" + str(num) if str(num).__len__() == 1 else str(num)
 
+def get_datestr(dt_obj):
+    """
+    Return a datestring in format "20160418". 
+    """
+    return str(dt_obj.year) + str(dt_obj.month) + str(dt_obj.day)
+
+def get_timestr(dt_obj):
+    """
+    Return a time in the format "01:00:00"
+    """
+    return str(dt_obj.hour) + ":" + str(dt_obj.minute) + ":" + str(dt_obj.second)
+
+def iso_to_dt(iso):
+    """
+    Parses an iso formatted time, returns datetime object
+    """
+    yr,mo,dy = map(int,(iso.split("T")[0]).split('-'))
+    hr,mt,sc = (iso.split("T")[1]).split(':')
+    hr, mt = map(int, [hr, mt])
+    sc, us = map(int, sc.split('.'))
+    out = dt(yr, mo, dy, hr, mt, sc, us)
+    return out
 
 # -----------------------------------------------------------------------------
 #                               DB FUNCTIONS
@@ -257,10 +275,8 @@ def start_db(dbname="superdarntimes.sqlite"):
 
     Entries in the Experiments Table have the following fields:
     - stid (station ID) : 
-    - start_date : date of the start of the .rawacf entry
-    - start_time : time of day of the start of the .rawacf entry
-    - end_date : date of the end of the .rawacf entry
-    - end_time : time of day of the end of the .rawacf entry
+    - start_iso : datetime of the start of the .rawacf entry (isoformat)
+    - end_iso : datetime of the end of the .rawacf entry (isoformat)
     - cpid : Control program ID number
     - cmd_name : program name that was called to create this .rawacf 
                 file (note: CPIDs and cmd_names should match eachother)
@@ -285,16 +301,14 @@ def start_db(dbname="superdarntimes.sqlite"):
     
     CREATE TABLE IF NOT EXISTS exps (
     stid integer NOT NULL,
-    start_date text NOT NULL,
-    start_time text NOT NULL, 
-    end_date text NOT NULL,
-    end_time text NOT NULL,
+    start_iso text NOT NULL,
+    end_iso text NOT NULL,
     cpid integer NOT NULL,
     cmd_name text NOT NULL,
     cmd_args text,
     nave_pos BOOLEAN,
     times_consistent BOOLEAN,
-    PRIMARY KEY (stid, start_date, start_time)
+    PRIMARY KEY (stid, start_iso)
     );
     """) 
     return cur
@@ -385,12 +399,14 @@ if __name__ == "__main__":
     cur.execute('select * from exps')
     tup = cur.fetchall()[0]
 
+    print("Now creating RawacfRecord files")
     # Test RawacfRecord's class method constructors
     r1 = RawacfRecord.record_from_dics(dics)
     r2 = RawacfRecord.record_from_tuple(tup)
     
     r2.stid = 90
-    r2.start_time = "05:23:32"
+    t = r2.start_dt
+    r2.start_dt = dt(t.year, t.month, t.day, t.hour+1, t.minute, t.second)
     # Test RawacfRecord's save_to_db()
     r2.save_to_db(cur)
     # Test __repr__()

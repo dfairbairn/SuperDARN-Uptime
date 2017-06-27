@@ -19,7 +19,14 @@ import numpy as np
 import dateutil.parser
 from datetime import datetime as dt
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, 
+    format='%(asctime)s %(levelname)s: %(message)s', 
+    datefmt='%m/%d/%Y %I:%M:%S %p')
+
+HOMEF = "/home/david"
+ENDPOINT = HOMEF + "/globus/tst-endpoint"
+GLOBUS_STARTUP_LOC = HOMEF + "/globus/globusconnectpersonal-2.3.3/globusconnect"
+SYNC_SCRIPT_LOC = HOMEF + "/globus/sync_radar_data_globus.py"
 
 class BadRawacfDataError(Exception):
     """
@@ -369,8 +376,8 @@ def dump_db(cur):
 
 def process_rawacfs_dates(start_month, start_year, end_month, end_year):
     """
-    Takes starting month and year and ending month and year as arguments. Steps
-    through each day in each year/month combo
+    The giant script that could be run which would repeatedly call 
+    process_rawacfs_month (might do this using a bash script though)
     """
     import subprocess
     import calendar 
@@ -382,35 +389,80 @@ def process_rawacfs_dates(start_month, start_year, end_month, end_year):
 
     # TODO: MAKE THIS PROCESS USER/MACHINE AGNOSTIC
     # I. Run the globus connect process
-    _ = subprocess.check_output('~/globus/globusconnectpersonal-2.3.3/globusconnect -start &')
+    _ = subprocess.check_output([GLOBUS_STARTUP_LOC, '-start', '&'])
 
-    logging.info("Beginning to process Rawacf logs... ")
     # II. For each yr, month:
     for yr, mo in month_year_iterator(start_month, start_year, end_month, end_year):
-        # Use the calendar module to help enumerate the days of the month
-        last_day = calendar.monthrange(yr, mo)[1]
-        logging.info("Starting to analyze {0}-{1} files...".format(str(yr), two_pad(mo))) 
+        process_rawacfs_month(yr, mo)
+ 
+def process_rawacfs_month(year, month):
+    """
+    Takes starting month and year and ending month and year as arguments. Steps
+    through each day in each year/month combo
+    """
+    import subprocess
+    import calendar 
 
-        # III. For each day in the month:
-        for dy in np.arange(1,last_day):
-            logging.info("\tLooking at {0}-{1}-{2}".format(
-                         str(yr), two_pad(mo), two_pad(dy)))
-            # A. First, grab the rawacfs via globus (and wait on it)
-            subprocess.check_output(
-                ['~/globus/sync_radar_data_globus.py','-y', str(yr), '-m',
-                str(mo), '-p', str(yr)+two_pad(mo)+two_pad(dy), './tmp_rawacfs/'])
-            logging.info("\t\tDone with fetching {0}-{1}-{2} rawacf data".format(
-                         str(yr), two_pad(mo), two_pad(dy)))
+    date = str(year) + two_pad(month)
+    logname = 'process_rawacf_{0}.log'.format(date)
+    logging.basicConfig(filename=logname, level=logging.INFO)
 
-            # B. Parse the rawacf files, save their metadata in our DB
-            parse_rawacf_folder('./tmp_rawacfs/')
-            logging.info("\t\tDone with parsing {0}-{1}-{2} rawacf data".format(
-                         str(yr), two_pad(mo), two_pad(dy)))
+    # TODO: MAKE THIS PROCESS USER/MACHINE AGNOSTIC
+    # I. Run the globus connect process
+    _ = subprocess.check_output([GLOBUS_STARTUP_LOC, '-start', '&'])
+
+    logging.info("Beginning to process Rawacf logs... ")
     
-            # C. Clear the rawacf files that were fetched in this cycle
-            subprocess.check_output(['rm','-rf','./tmp_rawacfs/*'])
-            logging.info("\t\tDone with clearing {0}-{1}-{2} rawacf data".format(
-                         str(yr), two_pad(mo), two_pad(dy)))
+    last_day = calendar.monthrange(yr, mo)[1]
+    logging.info("Starting to analyze {0}-{1} files...".format(str(yr), two_pad(mo))) 
+
+    # III. For each day in the month:
+    for dy in np.arange(1,last_day):
+        logging.info("\tLooking at {0}-{1}-{2}".format(
+                     str(yr), two_pad(mo), two_pad(dy)))
+        # A. First, grab the rawacfs via globus (and wait on it)
+        script_query = [SYNC_SCRIPT_LOC,'-y', str(yr), '-m',
+            str(mo), '-p', str(yr)+two_pad(mo)+two_pad(dy)+"*", ENDPOINT]
+        logging.info("\t\tPreparing to query: {0}".format(script_query))
+        fetch = subprocess.check_output(script_query)
+        logging.info("\t\tFetch request answered with: {0}".format(fetch))
+
+        # B. Parse the rawacf files, save their metadata in our DB
+        parse_rawacf_folder(ENDPOINT)
+        logging.info("\t\tDone with parsing {0}-{1}-{2} rawacf data".format(
+                     str(yr), two_pad(mo), two_pad(dy)))
+
+        # C. Clear the rawacf files that were fetched in this cycle
+        subprocess.check_output(['rm','-rf', ENDPOINT])
+        logging.info("\t\tDone with clearing {0}-{1}-{2} rawacf data".format(
+                     str(yr), two_pad(mo), two_pad(dy)))
+
+def test_process_rawacfs():
+    """
+    This method exists specifically to test whether everything's 
+    configured properly to run the script to grab an entire month or 
+    year's data. It attempts to start globus
+    """
+    import subprocess
+    # Test 1: running globusconnect 
+    _ = subprocess.check_output([GLOBUS_STARTUP_LOC, '-start', '&'])
+    #   If startup unsuccessful, check if its bc its already running
+
+    # Test 2: perform a globus fetch using the script
+    script_query = [SYNC_SCRIPT_LOC,'-y', '2017', '-m',
+        '01', '-p', '20170101*sas', ENDPOINT]
+    logging.info("Preparing to query: {0}".format(script_query))
+    fetch = subprocess.check_output(script_query)
+    logging.info("Fetch request answered with: {0}".format(fetch))
+
+    # Test 3: verify that we can parse this stuff
+    parse_rawacf_folder(ENDPOINT)
+    logging.info("Done with parsing 2017-01-01 'sas' rawacf data")
+   
+    # Test 4: Clear the rawacf files that we fetched
+    subprocess.check_output(['rm','-rf', ENDPOINT])
+    logging.info("Successfully removed 2017-01-01 'sas' rawacf data")
+
  
 def parse_rawacf_folder(folder):
     """
@@ -438,6 +490,9 @@ def parse_rawacf_folder(folder):
         conn.commit()
 
 if __name__ == "__main__":
+
+    # JUne 26: short term TODO: make it so that I don't do start_db() more than once
+
     if len(sys.argv) > 1:
         path = sys.argv[1]
         if os.path.isdir(path):
@@ -480,5 +535,3 @@ if __name__ == "__main__":
 
     dump_db(cur)
 
-    # EL GRANDE TEST
-    # process_rawacfs_dates(1, 2017, 2, 2017)

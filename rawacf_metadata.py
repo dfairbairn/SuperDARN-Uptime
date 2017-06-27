@@ -20,7 +20,7 @@ import dateutil.parser
 from datetime import datetime as dt
 
 logging.basicConfig(level=logging.INFO, 
-    format='%(asctime)s %(levelname)s: %(message)s', 
+    format='%(levelname)s %(asctime)s: %(message)s', 
     datefmt='%m/%d/%Y %I:%M:%S %p')
 
 HOMEF = "/home/david"
@@ -407,7 +407,6 @@ def process_rawacfs_month(year, month):
     logname = 'process_rawacf_{0}.log'.format(date)
     logging.basicConfig(filename=logname, level=logging.INFO)
 
-    # TODO: MAKE THIS PROCESS USER/MACHINE AGNOSTIC
     # I. Run the globus connect process
     _ = subprocess.check_output([GLOBUS_STARTUP_LOC, '-start', '&'])
 
@@ -424,18 +423,29 @@ def process_rawacfs_month(year, month):
         script_query = [SYNC_SCRIPT_LOC,'-y', str(yr), '-m',
             str(mo), '-p', str(yr)+two_pad(mo)+two_pad(dy)+"*", ENDPOINT]
         logging.info("\t\tPreparing to query: {0}".format(script_query))
-        fetch = subprocess.check_output(script_query)
-        logging.info("\t\tFetch request answered with: {0}".format(fetch))
+        try:
+            fetch = subprocess.check_output(script_query)
+            logging.info("\t\tFetch request answered with: {0}".format(fetch))
+        except CalledProcessError:
+            logging.error("\t\tFailed Globus query.")
+        except OSError:
+            logging.error("\t\tFailed to call Globus script")
 
-        # B. Parse the rawacf files, save their metadata in our DB
-        parse_rawacf_folder(ENDPOINT)
-        logging.info("\t\tDone with parsing {0}-{1}-{2} rawacf data".format(
-                     str(yr), two_pad(mo), two_pad(dy)))
+        try:
+            # B. Parse the rawacf files, save their metadata in our DB
+            parse_rawacf_folder(ENDPOINT)
+            logging.info("\t\tDone with parsing {0}-{1}-{2} rawacf data".format(
+                         str(yr), two_pad(mo), two_pad(dy)))
+        except OperationalError:
+            logging.error("\t\tDatabase locked - can't save metadata!")
 
         # C. Clear the rawacf files that were fetched in this cycle
-        subprocess.check_output(['rm','-rf', ENDPOINT])
-        logging.info("\t\tDone with clearing {0}-{1}-{2} rawacf data".format(
+        try:
+            subprocess.check_output(['rm','-rf', ENDPOINT])
+            logging.info("\t\tDone with clearing {0}-{1}-{2} rawacf data".format(
                      str(yr), two_pad(mo), two_pad(dy)))
+        except CalledProcessError:
+            logging.error("\t\tUnable to remove files.")
 
 def test_process_rawacfs():
     """
@@ -450,19 +460,31 @@ def test_process_rawacfs():
 
     # Test 2: perform a globus fetch using the script
     script_query = [SYNC_SCRIPT_LOC,'-y', '2017', '-m',
-        '01', '-p', '20170101*sas', ENDPOINT]
+        '01', '-p', '20170101.2*sas', ENDPOINT]
     logging.info("Preparing to query: {0}".format(script_query))
-    fetch = subprocess.check_output(script_query)
-    logging.info("Fetch request answered with: {0}".format(fetch))
+    try:
+        fetch = subprocess.check_output(script_query)
+        logging.info("Fetch request answered with: {0}".format(fetch))
+    except CalledProcessError:
+        logging.error("\t\tFailed Globus query.")
+    except OSError:
+        logging.error("\t\tFailed to call Globus script")
+
 
     # Test 3: verify that we can parse this stuff
-    parse_rawacf_folder(ENDPOINT)
-    logging.info("Done with parsing 2017-01-01 'sas' rawacf data")
-   
-    # Test 4: Clear the rawacf files that we fetched
-    subprocess.check_output(['rm','-rf', ENDPOINT])
-    logging.info("Successfully removed 2017-01-01 'sas' rawacf data")
+    try:
+        parse_rawacf_folder(ENDPOINT)
+        logging.info("Done with parsing 2017-01-01 'sas' rawacf data")
+    except OperationalError:
+        logging.error("\t\tDatabase locked - can't save metadata!")
 
+    # Test 4: Clear the rawacf files that we fetched
+    try:
+        subprocess.check_output(['rm','-rf', ENDPOINT])
+        logging.info("Successfully removed 2017-01-01 'sas' rawacf data")
+
+    except CalledProcessError:
+        logging.error("\t\tUnable to remove files")
  
 def parse_rawacf_folder(folder):
     """
@@ -472,7 +494,7 @@ def parse_rawacf_folder(folder):
     # For now just leave this empty; the stuff in if-main will go here
     assert(os.path.isdir(folder))
     logging.info("Acceptable path {0}. Analysis proceeding...".format(folder))
-    conn = start_db()
+    conn = connect_db()
     cur = conn.cursor()
     for fil in os.listdir(path):
         logging.info("File {0}:".format(fil)) 
@@ -491,7 +513,8 @@ def parse_rawacf_folder(folder):
 
 if __name__ == "__main__":
 
-    # JUne 26: short term TODO: make it so that I don't do start_db() more than once
+    # June 26: short term TODO: make it so that I don't do start_db() more than once
+         
 
     if len(sys.argv) > 1:
         path = sys.argv[1]

@@ -12,6 +12,7 @@ import backscatter
 import logging
 import os
 import sys
+import subprocess
 
 import sqlite3
 import numpy as np
@@ -452,7 +453,7 @@ def process_rawacfs_month(year, month):
         try:
             fetch = subprocess.check_output(script_query)
             logging.info("\t\tFetch request answered with: {0}".format(fetch))
-        except CalledProcessError:
+        except subprocess.CalledProcessError:
             logging.error("\t\tFailed Globus query.")
         except OSError:
             logging.error("\t\tFailed to call Globus script")
@@ -462,7 +463,7 @@ def process_rawacfs_month(year, month):
             parse_rawacf_folder(ENDPOINT)
             logging.info("\t\tDone with parsing {0}-{1}-{2} rawacf data".format(
                          str(yr), two_pad(mo), two_pad(dy)))
-        except OperationalError:
+        except:#OperationalError:
             logging.error("\t\tDatabase locked - can't save metadata!")
 
         # C. Clear the rawacf files that were fetched in this cycle
@@ -470,7 +471,7 @@ def process_rawacfs_month(year, month):
             subprocess.check_output(['rm','-rf', ENDPOINT])
             logging.info("\t\tDone with clearing {0}-{1}-{2} rawacf data".format(
                      str(yr), two_pad(mo), two_pad(dy)))
-        except CalledProcessError:
+        except subprocess.CalledProcessError:
             logging.error("\t\tUnable to remove files.")
 
 def test_process_rawacfs():
@@ -491,7 +492,7 @@ def test_process_rawacfs():
     try:
         fetch = subprocess.check_output(script_query)
         logging.info("Fetch request answered with: {0}".format(fetch))
-    except CalledProcessError:
+    except subprocess.CalledProcessError:
         logging.error("\t\tFailed Globus query.")
     except OSError:
         logging.error("\t\tFailed to call Globus script")
@@ -501,7 +502,7 @@ def test_process_rawacfs():
     try:
         parse_rawacf_folder(ENDPOINT)
         logging.info("Done with parsing 2017-01-01 'sas' rawacf data")
-    except OperationalError:
+    except:# subprocess.OperationalError:
         logging.error("\t\tDatabase locked - can't save metadata!")
 
     # Test 4: Clear the rawacf files that we fetched
@@ -509,7 +510,7 @@ def test_process_rawacfs():
         subprocess.check_output(['rm','-rf', ENDPOINT])
         logging.info("Successfully removed 2017-01-01 'sas' rawacf data")
 
-    except CalledProcessError:
+    except subprocess.CalledProcessError:
         logging.error("\t\tUnable to remove files")
  
 def parse_rawacf_folder(folder):
@@ -582,4 +583,4 @@ if __name__ == "__main__":
     print(r2)
 
     dump_db(cur)
-
+    conn.commit()

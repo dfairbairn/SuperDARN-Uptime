@@ -23,19 +23,13 @@ logging.basicConfig(level=logging.INFO,
     format='%(levelname)s %(asctime)s: %(message)s', 
     datefmt='%m/%d/%Y %I:%M:%S %p')
 
-HOMEF = "/home/david"
-ENDPOINT = HOMEF + "/globus/tst-endpoint"
-GLOBUS_STARTUP_LOC = HOMEF + "/globus/globusconnectpersonal-2.3.3/globusconnect"
-SYNC_SCRIPT_LOC = HOMEF + "/globus/sync_radar_data_globus.py"
-
 class BadRawacfDataError(Exception):
     """
     Raised when data from a rawacf file is inconsistent or incorrectly
     formatted, e.g. when a field which should be constant (e.g. origin 
     cmd) is inconsistent throughout a record.
     """
-    pass
-
+    pass 
 class RawacfRecord(object):
     """
     Class for containing a SuperDARN experiment record. Acquired by 
@@ -287,6 +281,38 @@ def month_year_iterator(start_month, start_year, end_month, end_year):
 #                              DB Methods 
 # -----------------------------------------------------------------------------
 
+def read_config(cfg_file='config.ini'):
+    """
+    Reads the local config file which specifies relevant paths.
+    """
+    import configparser as cps
+    try:
+        f = open(cfg_file,'r')
+    except IOError:
+        logging.error("No config file found! Configure your script environment.")
+        logging.info("Creating a sample configuration file...")
+        with open('sample_config.ini','w') as f:
+            f.write(
+                "# Change this filename to 'config.ini' and make the path\n" +
+                "# variables below point to the proper locations\n" +
+                "[Paths]\n"
+                "HOMEF: /path/to/homefolder\n" +
+                "ENDPOINT: /path/to/globus_endpoint\n" +
+                "GLOBUS_STARTUP_LOC: /path/to/globus_startupscript_folder\n" +
+                "SYNC_SCRIPT_LOC: /path/to/kevins_globus_sync_script")
+        return
+    config = cps.ConfigParser()
+    config.read_file(f)
+   
+    global HOMEF
+    global ENDPOINT
+    global GLOBUS_STARTUP_LOC
+    global SYNC_SCRIPT_LOC 
+    HOMEF = config.get('Paths','HOMEF')
+    ENDPOINT = config.get('Paths','ENDPOINT')
+    GLOBUS_STARTUP_LOC = config.get('Paths','GLOBUS_STARTUP_LOC')
+    SYNC_SCRIPT_LOC = config.get('Paths','SYNC_SCRIPT_LOC')
+
 def start_db(dbname="superdarntimes.sqlite"):
     """
     (Re)creates a database for storing experiment metadata parsed from 
@@ -514,7 +540,7 @@ def parse_rawacf_folder(folder):
 if __name__ == "__main__":
 
     # June 26: short term TODO: make it so that I don't do start_db() more than once
-         
+    read_config()         
 
     if len(sys.argv) > 1:
         path = sys.argv[1]
@@ -537,7 +563,6 @@ if __name__ == "__main__":
                 process_experiment(dics, cur)
                 # Now commit the changes
                 conn.commit()
-
 
     # Tests and sample usage
     cur.execute('select * from exps')

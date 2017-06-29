@@ -1,8 +1,11 @@
 """
 file: 'rawacf_metadata.py'
 description:
-    This file contains the methods and objects used for parsing rawacf
-    files and storing the experiment metadata in an sql database. 
+    This file (currently) contains all the methods and objects used 
+    for parsing rawacf files, storing the experiment metadata in an 
+    sql database, and performing high-level requests to process files
+    in a given folder or to fetch and process specific dates of rawacf
+    files. 
 
 author: David Fairbairn
 date: June 26 2017
@@ -20,9 +23,11 @@ import numpy as np
 import dateutil.parser
 from datetime import datetime as dt
 
-logging.basicConfig(level=logging.INFO, 
+logging.basicConfig(level=logging.DEBUG,
     format='%(levelname)s %(asctime)s: %(message)s', 
     datefmt='%m/%d/%Y %I:%M:%S %p')
+
+# TODO: Make the docstrings etc fit PEP8 widths
 
 class BadRawacfDataError(Exception):
     """
@@ -31,6 +36,7 @@ class BadRawacfDataError(Exception):
     cmd) is inconsistent throughout a record.
     """
     pass 
+
 class RawacfRecord(object):
     """
     Class for containing a SuperDARN experiment record. Acquired by 
@@ -131,12 +137,24 @@ class RawacfRecord(object):
         assert(type(dics[0]==dict))
         assert(len(dics)>1) 
         # Parse the <theoretically> constant parameters for the experiment
-        stid = process_field(dics, 'stid')
-        cpid = process_field(dics, 'cp')
-        cmd = process_field(dics, 'origin.command')
-        cmd_name = cmd.split(' ',1)[0]
-        cmd_args = cmd.split(' ',1)[1]
-    
+        try:
+            stid = process_field(dics, 'stid')
+        except BadRawacfDataError:
+            logging.error("Inconsistency found in station ID")
+            stid = -1
+        try:
+            cpid = process_field(dics, 'cp')
+        except BadRawacfDataError: 
+            logging.error("Inconsistency found in cpid")
+            cpid = -1
+        try:
+            cmd = process_field(dics, 'origin.command')
+            cmd_name = cmd.split(' ',1)[0]
+            cmd_args = cmd.split(' ',1)[1]
+        except BadRawacfDataError:
+            logging.error("Inconsistency found in origin command")
+            cmd = "<UnknownCommand>"
+   
         # Parse the start/end temporal fields 
         start_dt = reconstruct_datetime(dics[0])
         end_dt = reconstruct_datetime(dics[-1])
@@ -263,6 +281,18 @@ def iso_to_dt(iso):
     out = dt(yr, mo, dy, hr, mt, sc, us)
     return out
 
+def clear_endpoint():
+    """
+    Standalone function which will clear everything in the endpoint
+    """
+    if 'ENDPOINT' not in globals():
+        read_config()
+    for fil in os.listdir(ENDPOINT):
+        try:
+            subprocess.call(['rm',ENDPOINT+"/"+fil])
+        except:
+            logging.error("Exception thrown during removal of file {0}".format(fil))
+
 def month_year_iterator(start_month, start_year, end_month, end_year):
     """ Found on stackoverflow by user S.Lott.
     
@@ -314,9 +344,9 @@ def read_config(cfg_file='config.ini'):
     GLOBUS_STARTUP_LOC = config.get('Paths','GLOBUS_STARTUP_LOC')
     SYNC_SCRIPT_LOC = config.get('Paths','SYNC_SCRIPT_LOC')
 
-def start_db(dbname="superdarntimes.sqlite"):
+def connect_db(dbname="superdarntimes.sqlite"):
     """
-    (Re)creates a database for storing experiment metadata parsed from 
+    Connects to a database for storing experiment metadata parsed from 
     rawacf files.
 
     Entries in the Experiments Table have the following fields:
@@ -335,46 +365,27 @@ def start_db(dbname="superdarntimes.sqlite"):
                         between entries in the .rawacf are small and 
                         consistent (if not, there was downtime during)
 
-    *** nave_pos and times_consistent are currently stored as strings
-    expected to only take on values of "True" or "False" ***
+    *** nave_pos and times_consistent are currently stored as integers
+    expected to only take on values of "1" or "0" ***
     """
-    logging.info("Restarting the sqlite db...")
-    conn = sqlite3.connect(dbname)
-    cur = conn.cursor()
- 
-    cur.executescript("""
-    DROP TABLE IF EXISTS exps;
-    
-    CREATE TABLE IF NOT EXISTS exps (
-    stid integer NOT NULL,
-    start_iso text NOT NULL,
-    end_iso text NOT NULL,
-    cpid integer NOT NULL,
-    cmd_name text NOT NULL,
-    cmd_args text,
-    nave_pos BOOLEAN,
-    times_consistent BOOLEAN,
-    PRIMARY KEY (stid, start_iso)
-    );
-    """) 
-    return conn
-
-def connect_db(dbname="superdarntimes.sqlite"):
-    """
-    Connects to the database without messing around with it.
-    """
-    #TODO: But maybe checking that it has the right structure?
+    #TODO:  maybe should check that it has the right structure?
     conn = sqlite3.connect(dbname)
     return conn
 
-def process_experiment(dics, cur):
+def process_experiment(dics, cur, conn):
     """
     Takes a dmap-based list of dicts 'dics' for a SuperDARN experiment
     and enters the key statistics for the experiment into the sqlite
     database pointed to by cursor 'cur'
     """
+    cur = conn.cursor()
     r = RawacfRecord.record_from_dics(dics)
-    r.save_to_db(cur)
+    try:
+        r.save_to_db(cur)
+    except sqlite3.IntegrityError:
+        logging.error("Unique constraint failed or something.")     
+    except sqlite3.OperationalError: 
+        logging.error("\t\tDatabase locked - can't save metadata!")
     return r
 
 def select_exps(sql_select):
@@ -397,6 +408,26 @@ def dump_db(cur):
     cur.execute('''select * from exps''')
     print cur.fetchall()
 
+def clear_db(cur):
+    """
+    Clears all experiment information in the sqlite3 database.
+    """
+    cur.executescript("""
+    DROP TABLE IF EXISTS exps;
+    
+    CREATE TABLE IF NOT EXISTS exps (
+    stid integer NOT NULL,
+    start_iso text NOT NULL,
+    end_iso text NOT NULL,
+    cpid integer NOT NULL,
+    cmd_name text NOT NULL,
+    cmd_args text,
+    nave_pos BOOLEAN,
+    times_consistent BOOLEAN,
+    PRIMARY KEY (stid, start_iso)
+    );
+    """) 
+ 
 # -----------------------------------------------------------------------------
 #                           High-Level Methods 
 # -----------------------------------------------------------------------------
@@ -422,7 +453,7 @@ def process_rawacfs_dates(start_month, start_year, end_month, end_year):
     for yr, mo in month_year_iterator(start_month, start_year, end_month, end_year):
         process_rawacfs_month(yr, mo)
  
-def process_rawacfs_month(year, month):
+def process_rawacfs_month(yr, mo, conn=sqlite3.connect("superdarntimes.sqlite")):
     """
     Takes starting month and year and ending month and year as arguments. Steps
     through each day in each year/month combo
@@ -430,7 +461,7 @@ def process_rawacfs_month(year, month):
     import subprocess
     import calendar 
 
-    date = str(year) + two_pad(month)
+    date = str(yr) + two_pad(mo)
     logname = 'process_rawacf_{0}.log'.format(date)
     logging.basicConfig(filename=logname, level=logging.INFO)
 
@@ -444,6 +475,11 @@ def process_rawacfs_month(year, month):
 
     # III. For each day in the month:
     for dy in np.arange(1,last_day):
+        # Premature completion of script for debugging purposes 29-june-2017
+        if dy > 1:
+            logging.info("Completed subset of requested month's rawacf processing.")
+            return
+
         logging.info("\tLooking at {0}-{1}-{2}".format(
                      str(yr), two_pad(mo), two_pad(dy)))
         # A. First, grab the rawacfs via globus (and wait on it)
@@ -458,23 +494,20 @@ def process_rawacfs_month(year, month):
         except OSError:
             logging.error("\t\tFailed to call Globus script")
 
-        try:
-            # B. Parse the rawacf files, save their metadata in our DB
-            parse_rawacf_folder(ENDPOINT)
-            logging.info("\t\tDone with parsing {0}-{1}-{2} rawacf data".format(
-                         str(yr), two_pad(mo), two_pad(dy)))
-        except:#OperationalError:
-            logging.error("\t\tDatabase locked - can't save metadata!")
+        # B. Parse the rawacf files, save their metadata in our DB
+        parse_rawacf_folder(ENDPOINT, conn=conn)
+        logging.info("\t\tDone with parsing {0}-{1}-{2} rawacf data".format(
+                     str(yr), two_pad(mo), two_pad(dy)))
 
         # C. Clear the rawacf files that were fetched in this cycle
         try:
-            subprocess.check_output(['rm','-rf', ENDPOINT])
+            clear_endpoint()
             logging.info("\t\tDone with clearing {0}-{1}-{2} rawacf data".format(
                      str(yr), two_pad(mo), two_pad(dy)))
         except subprocess.CalledProcessError:
             logging.error("\t\tUnable to remove files.")
-
-def test_process_rawacfs():
+        
+def test_process_rawacfs(conn=sqlite3.connect("superdarntimes.sqlite")):
     """
     This method exists specifically to test whether everything's 
     configured properly to run the script to grab an entire month or 
@@ -487,7 +520,7 @@ def test_process_rawacfs():
 
     # Test 2: perform a globus fetch using the script
     script_query = [SYNC_SCRIPT_LOC,'-y', '2017', '-m',
-        '01', '-p', '20170101.2*sas', ENDPOINT]
+        '02', '-p', '20170209.02*sas', ENDPOINT]
     logging.info("Preparing to query: {0}".format(script_query))
     try:
         fetch = subprocess.check_output(script_query)
@@ -496,60 +529,70 @@ def test_process_rawacfs():
         logging.error("\t\tFailed Globus query.")
     except OSError:
         logging.error("\t\tFailed to call Globus script")
-
-
+ 
     # Test 3: verify that we can parse this stuff
-    try:
-        parse_rawacf_folder(ENDPOINT)
-        logging.info("Done with parsing 2017-01-01 'sas' rawacf data")
-    except:# subprocess.OperationalError:
-        logging.error("\t\tDatabase locked - can't save metadata!")
+    parse_rawacf_folder(ENDPOINT, conn=conn )
+    logging.info("Done with parsing 2017-02-09 'sas' rawacf data")
 
     # Test 4: Clear the rawacf files that we fetched
     try:
-        subprocess.check_output(['rm','-rf', ENDPOINT])
-        logging.info("Successfully removed 2017-01-01 'sas' rawacf data")
+        clear_endpoint()
+        logging.info("Successfully removed 2017-02-09 'sas' rawacf data")
 
     except subprocess.CalledProcessError:
         logging.error("\t\tUnable to remove files")
  
-def parse_rawacf_folder(folder):
+def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite")):
     """
     Takes a path to a folder which contains of .rawacf files, parses them
     and inserts them into the database.
     """
     # For now just leave this empty; the stuff in if-main will go here
     assert(os.path.isdir(folder))
-    logging.info("Acceptable path {0}. Analysis proceeding...".format(folder))
-    conn = connect_db()
     cur = conn.cursor()
-    for fil in os.listdir(path):
-        logging.info("File {0}:".format(fil)) 
-        if fil[-4:] == '.bz2':
-            dics = bz2_dic(path+'/'+fil)
-        elif fil[-7:] == '.rawacf':
-            dics = acf_dic(path+'/'+fil)
-        else:
-            # Could do something with these too?
-            logging.info('File not used for dmap records.')
+    logging.info("Acceptable path {0}. Analysis proceeding...".format(folder))
+    for i, fil in enumerate(os.listdir(folder)):
+        logging.info("{0} File: {1}".format(i, fil)) 
+        try:
+            if fil[-4:] == '.bz2':
+                dics = bz2_dic(folder + '/' + fil)
+            elif fil[-7:] == '.rawacf':
+                dics = acf_dic(folder + '/' + fil)
+            else:
+                # Could do something with these too?
+                logging.info('\tFile {0} not used for dmap records.'.format(fil))
+                continue
+        except backscatter.dmap.DmapDataError:
+            err_str = "Error reading dmap frmo stream - possible record" + \
+                      " corruption. Skipping file {0}"
+            logging.error(err_str)
             continue
+         
         # If it was a bz2 or rawacf, now we do scripty stuff with dict
-        process_experiment(dics, cur)
-        # Commit the database changes
+        try:
+            process_experiment(dics, cur, conn)
+            logging.info('\tFile {0} processed.'.format(fil))
+        except:
+            logging.error("\tException raised during process_experiment.")
+
+       # Commit the database changes
         conn.commit()
 
 if __name__ == "__main__":
 
-    # June 26: short term TODO: make it so that I don't do start_db() more than once
     read_config()         
 
     if len(sys.argv) > 1:
         path = sys.argv[1]
         if os.path.isdir(path):
-            # parse_rawacf_folder(sys.argv[1])
-            logging.info("Acceptable path. Analysis proceeding...")
-            conn = start_db()
+            clear_db()
+            conn = connect_db()
             cur = conn.cursor()
+
+
+    """
+            # parse_rawacf_folder(sys.argv[1], conn)
+            logging.info("Acceptable path. Analysis proceeding...")
             for fil in os.listdir(path):
                 logging.info("File {0}:".format(fil)) 
                 if fil[-4:] == '.bz2':
@@ -561,7 +604,7 @@ if __name__ == "__main__":
                     logging.info('File not used for dmap records.')
                     continue
                 # If it was a bz2 or rawacf, now we do scripty stuff with dict
-                process_experiment(dics, cur)
+                process_experiment(dics, cur, conn)
                 # Now commit the changes
                 conn.commit()
 
@@ -584,3 +627,4 @@ if __name__ == "__main__":
 
     dump_db(cur)
     conn.commit()
+    """

@@ -27,8 +27,6 @@ logging.basicConfig(level=logging.DEBUG,
     format='%(levelname)s %(asctime)s: %(message)s', 
     datefmt='%m/%d/%Y %I:%M:%S %p')
 
-# TODO: Make the docstrings etc fit PEP8 widths
-
 class BadRawacfDataError(Exception):
     """
     Raised when data from a rawacf file is inconsistent or incorrectly
@@ -59,7 +57,15 @@ class RawacfRecord(object):
                         between entries in the .rawacf are small and 
                         consistent (if not, there was downtime during)
 
-
+    *** METHODS ***
+        - Constructor (8 parameters)
+        - __repr__ string
+        - duration(): returns duration of this record in seconds
+        - save_to_db(): saves the record as a database entry, given a db cursor
+        - [Class method]: record_from_tuple(): build a RawacfRecord from a 
+                tuple of relevant information (likely originating from database)
+        - [Class method]: record_from_dics(): build a RawacfRecord from a 
+                list of dict (dmap records) originating from a .rawacf file
     """
     def __init__(self, stid, start_dt, end_dt, cpid,
                  cmd_name, cmd_args, nave_pos, times_consistent):
@@ -74,7 +80,7 @@ class RawacfRecord(object):
 
     def __repr__(self):
         """
-        How to spit out this thing's internals.
+        How to spit out this object's internals.
         """
         t0 = self.start_dt.isoformat()
         tf = self.end_dt.isoformat()
@@ -87,6 +93,8 @@ class RawacfRecord(object):
     def duration(self):
         """
         Computes the duration of the experiment in the record.
+        
+        :returns: total difference in seconds of end time minus start time
         """
         # datetimes can be subtracted to get intervals
         diff = end_dt - start_dt
@@ -96,6 +104,8 @@ class RawacfRecord(object):
         """
         Takes a cursor for an sqlite database and saves the object's 
         fields to the database
+
+        :param cur: Cursor to an sqlite3 database to save to.
         """
         start_time = (self.start_dt).isoformat()
         end_time = (self.end_dt).isoformat()
@@ -114,6 +124,11 @@ class RawacfRecord(object):
         contents of tuple 'tup' which is assumed to have been fetched 
         from the **SQLITE DB** (aka have the same order/structure as DB
         entries have, see the DB section).
+    
+        :param tup: [tuple] with 8 fields for making a RawacfRecord
+                    (see RawacfRecord's constructor parameters)
+        :returns: RawacfRecord object constructed from tuple's fields
+            
         """
         assert(len(tup) == 8)
         assert(tup[0] != None and tup[1] != None and tup[2] != None)
@@ -132,6 +147,10 @@ class RawacfRecord(object):
         Creates and returns a RawacfRecord object constructed from the 
         contents of a list of dictionaries that originates from parsing
         a **RAWACF FILE***
+
+        :param dics: list of dicts from parsing a Rawacf into dmaps
+        
+        :returns: RawacfRecord constructed from information in the dicts
         """ 
         assert(type(dics)==list)
         assert(type(dics[0]==dict))
@@ -153,8 +172,9 @@ class RawacfRecord(object):
             cmd_args = cmd.split(' ',1)[1]
         except BadRawacfDataError:
             logging.error("Inconsistency found in origin command")
-            cmd = "<UnknownCommand>"
-   
+            cmd_name = "<UnknownCommand>"
+            cmd_args = ""
+ 
         # Parse the start/end temporal fields 
         start_dt = reconstruct_datetime(dics[0])
         end_dt = reconstruct_datetime(dics[-1])
@@ -184,6 +204,11 @@ def bz2_dic(fname):
     Takes a compressed .rawacf file (in .bz2 format) and uses the
     backscatter library to retrieve a dictionary of a dmap object 
     parsed from its contents
+
+    :param fname: path + filename of the rawacf.bz2 file
+    
+    :returns: list of dictionaries from backscatter lib's parsing of
+                the .rawacf file
     """
     import bz2
     if not os.path.isfile(fname):
@@ -201,6 +226,11 @@ def acf_dic(fname):
     """ 
     Takes a .rawacf file and uses the backscatter library to retrieve 
     a dictionary of a dmap object parsed from its contents
+
+    :param fname: path + filename of the .rawacf file
+
+    :returns: list of dictionaries from backscatter lib's parsing of
+                the .rawacf file
     """
     if not os.path.isfile(fname):
         logging.error('Not a file!')
@@ -213,31 +243,81 @@ def acf_dic(fname):
     dics = backscatter.dmap.parse_dmap_format_from_stream(stream)
     return dics
 
+def read_config(cfg_file='config.ini'):
+    """
+    Reads the local config file which provides definitions for a few global
+    path variables for the script.
+
+    [:param cfg_file: [str] stating the name of the config file to look for]
+    """
+    import configparser as cps
+    try:
+        f = open(cfg_file,'r')
+    except IOError:
+        logging.error("No config file found! Configure your script environment.")
+        logging.info("Creating a sample configuration file...")
+        with open('sample_config.ini','w') as f:
+            f.write(
+                "# Change this filename to 'config.ini' and make the path\n" +
+                "# variables below point to the proper locations\n" +
+                "[Paths]\n"
+                "HOMEF: /path/to/homefolder\n" +
+                "ENDPOINT: /path/to/globus_endpoint\n" +
+                "GLOBUS_STARTUP_LOC: /path/to/globus_startupscript_folder\n" +
+                "SYNC_SCRIPT_LOC: /path/to/kevins_globus_sync_script")
+        return
+    config = cps.ConfigParser()
+    config.read_file(f)
+   
+    global HOMEF
+    global ENDPOINT
+    global GLOBUS_STARTUP_LOC
+    global SYNC_SCRIPT_LOC 
+    HOMEF = config.get('Paths','HOMEF')
+    ENDPOINT = config.get('Paths','ENDPOINT')
+    GLOBUS_STARTUP_LOC = config.get('Paths','GLOBUS_STARTUP_LOC')
+    SYNC_SCRIPT_LOC = config.get('Paths','SYNC_SCRIPT_LOC')
+
 def reconstruct_datetime(dic):
     """
     Takes a dictionary of a dmap and constructs a datetime object from 
     the dmap object's time fields
+
+    :param dic: a single dictionary from DMAP, containing time info
+
+    :returns: time information in a python [Datetime] object
     """
     t = dt(dic['time.yr'], dic['time.mo'], dic['time.dy'], dic['time.hr'], 
            dic['time.mt'], dic['time.sc'], dic['time.us']) 
     return t
 
-def process_field(dics,field):
+def process_field(dics, field):
     """
     Takes a list of dictionaries representing the dmap object for a 
     rawacf file as well as a particular field, and extracts the field 
     and checks that the field has the same value for each dictionary in
-    the list.
+    the list. If not, raises an exception indicating likely corrupted record
+
+    :param dics: the list of dicts from backscatter lib's parse of a .rawacf
+    
+    :returns: [abstract] the value that's been requested if it's consistent    
     """
     val = dics[0][field]
     for i in dics:
         if i[field] != val:
+            dbg_str = "process_field() was seeing record of {0}".format(val)
+            dbg_str += " for '{0}' but now sees {1}".format(field, i[field])
+            logging.debug(dbg_str)
             raise BadRawacfDataError
     return val
 
 def has_positive_nave(dics):
     """
     Checks for correct values of 'nave' - the number of pulses detected.
+    
+    :param dics: the list of dicts from backscatter lib's parse of a .rawacf
+
+    :returns: [boolean] True/False stating whether all vals of 'nave' are positive
     """
     for i in dics:
         if i['nave'] <= 0:
@@ -247,6 +327,10 @@ def has_positive_nave(dics):
 def two_pad(num):
     """ 
     Takes in a number of 1 or 2 digits, returns a string of two digits. 
+
+    :param num: an [int] between 0 and 99
+
+    :returns: a [str] of length 2
     """
     assert isinstance(num,int)
     assert (num < 100 and num >= 0)
@@ -255,24 +339,41 @@ def two_pad(num):
 def get_datestr(dt_obj):
     """
     Return a datestring in format "20160418". 
+
+    :param dt_obj: a [Datetime] object
+    
+    :returns: a [str] of format yyyymmdd
     """
     return str(dt_obj.year) + str(dt_obj.month) + str(dt_obj.day)
 
 def get_timestr(dt_obj):
     """
     Return a time in the format "01:00:00"
+
+    :param dt_obj: a [Datetime] object
+
+    :returns: a [str] of format hh:mm:ss (hours, min, sec)
     """
     return str(dt_obj.hour) + ":" + str(dt_obj.minute) + ":" + str(dt_obj.second)
 
 def get_tod_seconds(dt_obj):
     """
     Returns the time of day (since 00h00m00s) in seconds
+
+    :param dt_obj: a [Datetime] object
+
+    :returns: a [float] of seconds since the start of the day '00:00:00'
     """
     return dt_obj.hour*3600. + dt_obj.minute*60. + dt_obj.second + 1E-6*dt_obj.microsecond
 
 def iso_to_dt(iso):
     """
     Parses an iso formatted time, returns datetime object
+
+    :param iso: a [str] of a date & time in ISO format 
+                e.g. "2017-06-30T10:51:43.68922"
+
+    :returns: a [Datetime] object
     """
     yr,mo,dy = map(int,(iso.split("T")[0]).split('-'))
     hr,mt,sc = (iso.split("T")[1]).split(':')
@@ -311,39 +412,6 @@ def month_year_iterator(start_month, start_year, end_month, end_year):
 # -----------------------------------------------------------------------------
 #                              DB Methods 
 # -----------------------------------------------------------------------------
-
-def read_config(cfg_file='config.ini'):
-    """
-    Reads the local config file which specifies relevant paths.
-    """
-    import configparser as cps
-    try:
-        f = open(cfg_file,'r')
-    except IOError:
-        logging.error("No config file found! Configure your script environment.")
-        logging.info("Creating a sample configuration file...")
-        with open('sample_config.ini','w') as f:
-            f.write(
-                "# Change this filename to 'config.ini' and make the path\n" +
-                "# variables below point to the proper locations\n" +
-                "[Paths]\n"
-                "HOMEF: /path/to/homefolder\n" +
-                "ENDPOINT: /path/to/globus_endpoint\n" +
-                "GLOBUS_STARTUP_LOC: /path/to/globus_startupscript_folder\n" +
-                "SYNC_SCRIPT_LOC: /path/to/kevins_globus_sync_script")
-        return
-    config = cps.ConfigParser()
-    config.read_file(f)
-   
-    global HOMEF
-    global ENDPOINT
-    global GLOBUS_STARTUP_LOC
-    global SYNC_SCRIPT_LOC 
-    HOMEF = config.get('Paths','HOMEF')
-    ENDPOINT = config.get('Paths','ENDPOINT')
-    GLOBUS_STARTUP_LOC = config.get('Paths','GLOBUS_STARTUP_LOC')
-    SYNC_SCRIPT_LOC = config.get('Paths','SYNC_SCRIPT_LOC')
-
 def connect_db(dbname="superdarntimes.sqlite"):
     """
     Connects to a database for storing experiment metadata parsed from 
@@ -371,6 +439,26 @@ def connect_db(dbname="superdarntimes.sqlite"):
     #TODO:  maybe should check that it has the right structure?
     conn = sqlite3.connect(dbname)
     return conn
+
+def clear_db(cur):
+    """
+    Clears all experiment information in the sqlite3 database.
+    """
+    cur.executescript("""
+    DROP TABLE IF EXISTS exps;
+    
+    CREATE TABLE IF NOT EXISTS exps (
+    stid integer NOT NULL,
+    start_iso text NOT NULL,
+    end_iso text NOT NULL,
+    cpid integer NOT NULL,
+    cmd_name text NOT NULL,
+    cmd_args text,
+    nave_pos BOOLEAN,
+    times_consistent BOOLEAN,
+    PRIMARY KEY (stid, start_iso)
+    );
+    """) 
 
 def process_experiment(dics, cur, conn):
     """
@@ -408,178 +496,7 @@ def dump_db(cur):
     cur.execute('''select * from exps''')
     print cur.fetchall()
 
-def clear_db(cur):
-    """
-    Clears all experiment information in the sqlite3 database.
-    """
-    cur.executescript("""
-    DROP TABLE IF EXISTS exps;
-    
-    CREATE TABLE IF NOT EXISTS exps (
-    stid integer NOT NULL,
-    start_iso text NOT NULL,
-    end_iso text NOT NULL,
-    cpid integer NOT NULL,
-    cmd_name text NOT NULL,
-    cmd_args text,
-    nave_pos BOOLEAN,
-    times_consistent BOOLEAN,
-    PRIMARY KEY (stid, start_iso)
-    );
-    """) 
- 
-# -----------------------------------------------------------------------------
-#                           High-Level Methods 
-# -----------------------------------------------------------------------------
-
-def process_rawacfs_dates(start_month, start_year, end_month, end_year):
-    """
-    The giant script that could be run which would repeatedly call 
-    process_rawacfs_month (might do this using a bash script though)
-    """
-    import subprocess
-    import calendar 
-
-    start = str(start_year) + two_pad(start_month)
-    end = str(end_year) + two_pad(end_month)
-    logname = 'process_rawacf_{0}_{1}.log'.format(start, end)
-    logging.basicConfig(filename=logname, level=logging.INFO)
-
-    # TODO: MAKE THIS PROCESS USER/MACHINE AGNOSTIC
-    # I. Run the globus connect process
-    _ = subprocess.check_output([GLOBUS_STARTUP_LOC, '-start', '&'])
-
-    # II. For each yr, month:
-    for yr, mo in month_year_iterator(start_month, start_year, end_month, end_year):
-        process_rawacfs_month(yr, mo)
- 
-def process_rawacfs_month(yr, mo, conn=sqlite3.connect("superdarntimes.sqlite")):
-    """
-    Takes starting month and year and ending month and year as arguments. Steps
-    through each day in each year/month combo
-    """
-    import subprocess
-    import calendar 
-
-    date = str(yr) + two_pad(mo)
-    logname = 'process_rawacf_{0}.log'.format(date)
-    logging.basicConfig(filename=logname, level=logging.INFO)
-
-    # I. Run the globus connect process
-    _ = subprocess.check_output([GLOBUS_STARTUP_LOC, '-start', '&'])
-
-    logging.info("Beginning to process Rawacf logs... ")
-    
-    last_day = calendar.monthrange(yr, mo)[1]
-    logging.info("Starting to analyze {0}-{1} files...".format(str(yr), two_pad(mo))) 
-
-    # III. For each day in the month:
-    for dy in np.arange(1,last_day):
-        # Premature completion of script for debugging purposes 29-june-2017
-        if dy > 1:
-            logging.info("Completed subset of requested month's rawacf processing.")
-            return
-
-        logging.info("\tLooking at {0}-{1}-{2}".format(
-                     str(yr), two_pad(mo), two_pad(dy)))
-        # A. First, grab the rawacfs via globus (and wait on it)
-        script_query = [SYNC_SCRIPT_LOC,'-y', str(yr), '-m',
-            str(mo), '-p', str(yr)+two_pad(mo)+two_pad(dy)+"*", ENDPOINT]
-        logging.info("\t\tPreparing to query: {0}".format(script_query))
-        try:
-            fetch = subprocess.check_output(script_query)
-            logging.info("\t\tFetch request answered with: {0}".format(fetch))
-        except subprocess.CalledProcessError:
-            logging.error("\t\tFailed Globus query.")
-        except OSError:
-            logging.error("\t\tFailed to call Globus script")
-
-        # B. Parse the rawacf files, save their metadata in our DB
-        parse_rawacf_folder(ENDPOINT, conn=conn)
-        logging.info("\t\tDone with parsing {0}-{1}-{2} rawacf data".format(
-                     str(yr), two_pad(mo), two_pad(dy)))
-
-        # C. Clear the rawacf files that were fetched in this cycle
-        try:
-            clear_endpoint()
-            logging.info("\t\tDone with clearing {0}-{1}-{2} rawacf data".format(
-                     str(yr), two_pad(mo), two_pad(dy)))
-        except subprocess.CalledProcessError:
-            logging.error("\t\tUnable to remove files.")
-        
-def test_process_rawacfs(conn=sqlite3.connect("superdarntimes.sqlite")):
-    """
-    This method exists specifically to test whether everything's 
-    configured properly to run the script to grab an entire month or 
-    year's data. It attempts to start globus
-    """
-    import subprocess
-    # Test 1: running globusconnect 
-    _ = subprocess.check_output([GLOBUS_STARTUP_LOC, '-start', '&'])
-    #   If startup unsuccessful, check if its bc its already running
-
-    # Test 2: perform a globus fetch using the script
-    script_query = [SYNC_SCRIPT_LOC,'-y', '2017', '-m',
-        '02', '-p', '20170209.02*sas', ENDPOINT]
-    logging.info("Preparing to query: {0}".format(script_query))
-    try:
-        fetch = subprocess.check_output(script_query)
-        logging.info("Fetch request answered with: {0}".format(fetch))
-    except subprocess.CalledProcessError:
-        logging.error("\t\tFailed Globus query.")
-    except OSError:
-        logging.error("\t\tFailed to call Globus script")
- 
-    # Test 3: verify that we can parse this stuff
-    parse_rawacf_folder(ENDPOINT, conn=conn )
-    logging.info("Done with parsing 2017-02-09 'sas' rawacf data")
-
-    # Test 4: Clear the rawacf files that we fetched
-    try:
-        clear_endpoint()
-        logging.info("Successfully removed 2017-02-09 'sas' rawacf data")
-
-    except subprocess.CalledProcessError:
-        logging.error("\t\tUnable to remove files")
- 
-def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite")):
-    """
-    Takes a path to a folder which contains of .rawacf files, parses them
-    and inserts them into the database.
-    """
-    # For now just leave this empty; the stuff in if-main will go here
-    assert(os.path.isdir(folder))
-    cur = conn.cursor()
-    logging.info("Acceptable path {0}. Analysis proceeding...".format(folder))
-    for i, fil in enumerate(os.listdir(folder)):
-        logging.info("{0} File: {1}".format(i, fil)) 
-        try:
-            if fil[-4:] == '.bz2':
-                dics = bz2_dic(folder + '/' + fil)
-            elif fil[-7:] == '.rawacf':
-                dics = acf_dic(folder + '/' + fil)
-            else:
-                # Could do something with these too?
-                logging.info('\tFile {0} not used for dmap records.'.format(fil))
-                continue
-        except backscatter.dmap.DmapDataError:
-            err_str = "Error reading dmap frmo stream - possible record" + \
-                      " corruption. Skipping file {0}"
-            logging.error(err_str)
-            continue
-         
-        # If it was a bz2 or rawacf, now we do scripty stuff with dict
-        try:
-            process_experiment(dics, cur, conn)
-            logging.info('\tFile {0} processed.'.format(fil))
-        except:
-            logging.error("\tException raised during process_experiment.")
-
-       # Commit the database changes
-        conn.commit()
-
 if __name__ == "__main__":
-
     read_config()         
 
     if len(sys.argv) > 1:

@@ -93,7 +93,6 @@ def process_rawacfs_month(yr, mo, conn=sqlite3.connect("superdarntimes.sqlite"))
 
     # I. Run the globus connect process
     _ = subprocess.check_output([rmet.GLOBUS_STARTUP_LOC, '-start', '&'])
-    #   TODO: If startup unsuccessful, check if its bc its already running
 
     logging.info("Beginning to process Rawacf logs... ")
     
@@ -101,7 +100,7 @@ def process_rawacfs_month(yr, mo, conn=sqlite3.connect("superdarntimes.sqlite"))
     logging.info("Starting to analyze {0}-{1} files...".format(str(yr), two_pad(mo))) 
 
     # II. For each day in the month:
-    for dy in np.arange(1,last_day):
+    for dy in np.arange(1,last_day+1):
         # Premature completion of script for debugging purposes 29-june-2017
         if dy > 1:
             logging.info("Completed subset of requested month's rawacf processing.")
@@ -208,12 +207,11 @@ def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite")):
         try:
             r = rmet.process_experiment(dics, cur, conn)
             if r.not_corrupt == False:
-                raise rawacf_metadata.BadRawacfDataError('Data anomaly detected with {0}'.format(fil))
+                raise rmet.BadRawacfDataError('Data anomaly detected with {0}'.format(fil))
             # Else, log the successful processing
             logging.info('\tFile {0} processed.'.format(fil))
         except Exception as e:
-            logging.error("\tException raised during process_experiment.")
-            logging.error("\tException was: {0}".format(e))
+            logging.error("\tException raised during process_experiment: {0}".format(e))
             # ***ADD TO LIST OF BAD_RAWACFS ***
             with open(BAD_RAWACFS_FILE, 'a') as f:
                 f.write(fil + ':' + str(e) + '\n')
@@ -241,7 +239,7 @@ def stats_day(date_str, cur, stid=5):
     date_str_iso = date_str[:4] + "-" + date_str[4:6] + "-" + date_str[-2:]
 
     # TODO: FIND SQLITE ALTERNATIVE TO USING 'REGEXP'
-    sql = 'select * from exps where start_iso regexp "%s" or end_iso regexp "%s" and stid=%d'
+    sql = 'SELECT * from exps WHERE start_iso like "%s" or end_iso like "%s" and stid="%d"'
     
     uptime_on_day = dict()
     recs = rmet.select_exps(sql % (date_str_iso, date_str_iso, stid), cur)
@@ -274,6 +272,7 @@ def stats_month(date_str, cur, stid=5):
     """
     As above so below baby
     """
+    
     return None
 
 if __name__ == "__main__":

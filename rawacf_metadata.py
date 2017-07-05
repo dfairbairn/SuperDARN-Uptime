@@ -168,14 +168,14 @@ class RawacfRecord(object):
         # Parse the <theoretically> constant parameters for the experiment
         try:
             stid = process_field(dics, 'stid')
-        except BadRawacfDataError:
-            logging.error("Inconsistency found in station ID")
+        except BadRawacfDataError as e:
+            logging.error("Inconsistency found in station ID: {0}".format(e))
             stid = -1
             not_corrupt = False
         try:
             cpid = process_field(dics, 'cp')
-        except BadRawacfDataError: 
-            logging.error("Inconsistency found in cpid")
+        except BadRawacfDataError as e: 
+            logging.error("Inconsistency found in cpid: {0}".format(e))
             cpid = -1
             not_corrupt = False
         try:
@@ -328,8 +328,7 @@ def process_field(dics, field):
         if i[field] != val:
             dbg_str = "process_field() was seeing record of {0}".format(val)
             dbg_str += " for '{0}' but now sees {1}".format(field, i[field])
-            logging.debug(dbg_str)
-            raise BadRawacfDataError
+            raise BadRawacfDataError(dbg_str)
     return val
 
 def has_positive_nave(dics):

@@ -102,9 +102,9 @@ def process_rawacfs_month(yr, mo, conn=sqlite3.connect("superdarntimes.sqlite"))
     # II. For each day in the month:
     for dy in np.arange(1,last_day+1):
         # Premature completion of script for debugging purposes 29-june-2017
-        if dy > 1:
-            logging.info("Completed subset of requested month's rawacf processing.")
-            return
+        #if dy > 1:
+        #    logging.info("Completed subset of requested month's rawacf processing.")
+        #    return
 
         logging.info("\tLooking at {0}-{1}-{2}".format(
                      str(yr), two_pad(mo), two_pad(dy)))
@@ -132,6 +132,9 @@ def process_rawacfs_month(yr, mo, conn=sqlite3.connect("superdarntimes.sqlite"))
                      str(yr), two_pad(mo), two_pad(dy)))
         except subprocess.CalledProcessError:
             logging.error("\t\tUnable to remove files.")
+
+    logging.info("Completed processing of requested month's rawacf data.")
+    return
         
 def test_process_rawacfs(conn=sqlite3.connect("superdarntimes.sqlite")):
     """

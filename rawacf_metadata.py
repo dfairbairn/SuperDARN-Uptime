@@ -501,6 +501,7 @@ def select_exps(sql_select, cur):
     Takes an sql query to select certain experiments, returns the list
     of RawacfRecord objects
     """
+    logging.info("Querying with the following string:\n{0}".format(sql_select))
     cur.execute(sql_select)
     entries = cur.fetchall()
     records = []

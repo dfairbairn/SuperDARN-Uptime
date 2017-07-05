@@ -241,13 +241,9 @@ def stats_day(date_str, cur, stid=5):
     assert(len(date_str)==8 and str.isdigit(date_str))
     date_str_iso = date_str[:4] + "-" + date_str[4:6] + "-" + date_str[-2:]
 
-    # TODO: FIND SQLITE ALTERNATIVE TO USING 'REGEXP'
-    sql = 'SELECT * from exps WHERE start_iso like "%s" or end_iso like "%s" and stid="%d"'
-    
     uptime_on_day = dict()
-    recs = rmet.select_exps(sql % (date_str_iso, date_str_iso, stid), cur)
-    print recs
-    return None
+    sql = "select * from exps where (start_iso like '%{0}%' or end_iso like '%{1}%') and stid='{2}'"
+    recs = rmet.select_exps(sql.format(date_str_iso, date_str_iso, stid), cur)
     """
     for r in recs:
         st = r.start_dt

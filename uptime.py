@@ -27,9 +27,25 @@ import backscatter
 import rawacf_metadata as rmet
 from rawacf_metadata import two_pad
 
+BAD_RAWACFS_FILE = './bad_rawacfs.txt'
+LOG_FILE = 'uptime.log'
+SEC_IN_DAY = 86400.0
+
 logging.basicConfig(level=logging.DEBUG,
     format='%(levelname)s %(asctime)s: %(message)s', 
     datefmt='%m/%d/%Y %I:%M:%S %p')
+
+logFormatter = logging.Formatter('%(levelname)s %(asctime)s: %(message)s')
+rootLogger = logging.getLogger()
+
+fileHandler = logging.FileHandler("./{0}".format(LOG_FILE))
+fileHandler.setFormatter(logFormatter)
+rootLogger.addHandler(fileHandler)
+
+#consoleHandler = logging.StreamHandler()
+#consoleHandler.setFormatter(logFormatter)
+#rootLogger.addHandler(consoleHandler)
+
 
 # -----------------------------------------------------------------------------
 #                           High-Level Methods 
@@ -179,21 +195,31 @@ def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite")):
                 # Could do something with these too?
                 logging.info('\tFile {0} not used for dmap records.'.format(fil))
                 continue
-        except backscatter.dmap.DmapDataError:
-            err_str = "Error reading dmap frmo stream - possible record" + \
-                      " corruption. Skipping file {0}"
+        except backscatter.dmap.DmapDataError as e:
+            err_str = "Error reading dmap from stream - possible record" + \
+                      " corruption. Skipping file {0}".format(fil)
             logging.error(err_str)
+            # ***ADD TO LIST OF BAD_RAWACFS ***
+            with open(BAD_RAWACFS_FILE, 'a') as f:
+                f.write(fil + ':' + str(e))
             continue
          
         # If it was a bz2 or rawacf, now we do scripty stuff with dict
         try:
-            rmet.process_experiment(dics, cur, conn)
+            r = rmet.process_experiment(dics, cur, conn)
+            if r.not_corrupt == False:
+                raise rawacf_metadata.BadRawacfDataError('Data anomaly detected with {0}'.format(fil))
+            # Else, log the successful processing
             logging.info('\tFile {0} processed.'.format(fil))
-        except:
+        except Exception as e:
             logging.error("\tException raised during process_experiment.")
+            logging.error("\tException was: {0}".format(e))
+            # ***ADD TO LIST OF BAD_RAWACFS ***
+            with open(BAD_RAWACFS_FILE, 'a') as f:
+                f.write(fil + ':' + str(e) + '\n')
 
-       # Commit the database changes
-        conn.commit()
+    # Commit the database changes
+    conn.commit()
 
 # -----------------------------------------------------------------------------
 #                           POST PROCESSING METHODS
@@ -210,36 +236,39 @@ def stats_day(date_str, cur, stid=5):
         stid (int): the station ID for the SuperDARN array desired
                 see here: http://superdarn.ca/news/item/58-sd-radar-list
     """
-
-    # TODO: Finish this!
-
     import heapq
-    sql = 'select * from exps where start_date regexp "%s" or end_date regexp "%s"'
-    schedule = []
-    rec_keys = dict()
-    recs = select_exps(sql)
-    for r in recs:
-        start_tod = get_tod_seconds(r.start_dt)
-        end_tod = get_tod_seconds(r.end_dt)
-        rec_keys[start_tod] = r
-        if r.start_date != date_str:
-            heapq.heappush(schedule, 0.)
-        else: 
-            heapq.heappush(schedule, tod_sc)
-    # Now we have a sorted list of the rawacf records for this day
-    durations = []
-    # Now use the 
-    for start_sc in [heappop(schedule) for i in range(len(schedule))]:
-        r = rec_keys[start_sc]
-        if start_t_s == 0:
-            # Then take the end
-            #durations.append(r.end_time)
-            pass
-        else:
-            pass
-            #durations.append(r.end_time - r.start_time)
-    # sum the intervals in durations and divide by 24hr*3600s/hr
+    assert(len(date_str)==8 and str.isdigit(date_str))
+    date_str_iso = date_str[:4] + "-" + date_str[4:6] + "-" + date_str[-2:]
+
+    # TODO: FIND SQLITE ALTERNATIVE TO USING 'REGEXP'
+    sql = 'select * from exps where start_iso regexp "%s" or end_iso regexp "%s" and stid=%d'
+    
+    uptime_on_day = dict()
+    recs = rmet.select_exps(sql % (date_str_iso, date_str_iso, stid), cur)
+    print recs
     return None
+    """
+    for r in recs:
+        st = r.start_dt
+        et = r.end_dt
+        if rmet.get_datestr(st) != rmet.get_datestr(et):
+            if date_str == rmet.get_datestr(st):
+                # Special case of end-of-day record
+                seconds_this_day = SEC_IN_DAY - rmet.get_tod_seconds(st)
+            elif date_str == rmet.get_datestr(et):
+                # Special case of start-of-day record
+                seconds_prev_day = SEC_IN_DAY - rmet.get_tod_seconds(st)
+                seconds_this_day = r.duration() - seconds_prev_day                
+            else: 
+                # This shouldn't ever happen
+                raise Exception('Unexpected start date and end date discrepancies?')
+        else:
+            seconds_this_day = r.duration() 
+        uptime_on_day[r] = seconds_this_day 
+    
+    uptime_pct = sum(uptime_on_day.values())/SEC_IN_DAY
+    return uptime_pct
+    """
 
 def stats_month(date_str, cur, stid=5):
     """

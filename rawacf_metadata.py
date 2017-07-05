@@ -56,6 +56,12 @@ class RawacfRecord(object):
         - times_consistent : boolean flag stating that the time difference
                         between entries in the .rawacf are small and 
                         consistent (if not, there was downtime during)
+        - not_corrupt : boolean flag indicating if an exception occurred in 
+                    parsing for or creating this record.
+                * This is needed to indicate to uptime.parse_rawacf_folder()
+                  when there's been non-critical exceptions raised in creating
+                  a RawacfRecord instance (indicates if there were problems)*
+
 
     *** METHODS ***
         - Constructor (8 parameters)
@@ -68,7 +74,10 @@ class RawacfRecord(object):
                 list of dict (dmap records) originating from a .rawacf file
     """
     def __init__(self, stid, start_dt, end_dt, cpid,
-                 cmd_name, cmd_args, nave_pos, times_consistent):
+                 cmd_name, cmd_args, nave_pos, times_consistent, not_corrupt=True):
+        """
+        Self-explanatory constructor method.
+        """
         self.start_dt = start_dt
         self.end_dt = end_dt
         self.stid = stid
@@ -77,6 +86,7 @@ class RawacfRecord(object):
         self.cmd_args = cmd_args 
         self.nave_pos = nave_pos
         self.times_consistent = times_consistent
+        self.not_corrupt = not_corrupt
 
     def __repr__(self):
         """
@@ -161,19 +171,27 @@ class RawacfRecord(object):
         except BadRawacfDataError:
             logging.error("Inconsistency found in station ID")
             stid = -1
+            not_corrupt = False
         try:
             cpid = process_field(dics, 'cp')
         except BadRawacfDataError: 
             logging.error("Inconsistency found in cpid")
             cpid = -1
+            not_corrupt = False
         try:
             cmd = process_field(dics, 'origin.command')
-            cmd_name = cmd.split(' ',1)[0]
-            cmd_args = cmd.split(' ',1)[1]
+            cmd_spl =  cmd.split(' ',1)
+            if len(cmd_spl)==1:
+                cmd_name = cmd
+                cmd_args = ""
+            else:
+                cmd_name = cmd.split(' ',1)[0]
+                cmd_args = cmd.split(' ',1)[1]
         except BadRawacfDataError:
             logging.error("Inconsistency found in origin command")
             cmd_name = "<UnknownCommand>"
             cmd_args = ""
+            not_corrupt = False
  
         # Parse the start/end temporal fields 
         start_dt = reconstruct_datetime(dics[0])
@@ -191,8 +209,11 @@ class RawacfRecord(object):
 
         # Check that every difference between entries is 20 seconds or less
         times_consistent = int(( np.array(diffs) < 20 ).all())
+
+        if 'not_corrupt' not in locals():
+            not_corrupt = True
         return cls(stid, start_dt, end_dt, cpid, cmd_name, cmd_args, nave_pos, 
-                   times_consistent)
+                   times_consistent, not_corrupt)
 
 # -----------------------------------------------------------------------------
 #                               Utility Methods 
@@ -476,7 +497,7 @@ def process_experiment(dics, cur, conn):
         logging.error("\t\tDatabase locked - can't save metadata!")
     return r
 
-def select_exps(sql_select):
+def select_exps(sql_select, cur):
     """
     Takes an sql query to select certain experiments, returns the list
     of RawacfRecord objects

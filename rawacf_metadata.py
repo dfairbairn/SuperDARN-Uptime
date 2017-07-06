@@ -169,13 +169,13 @@ class RawacfRecord(object):
         try:
             stid = process_field(dics, 'stid')
         except BadRawacfDataError as e:
-            logging.error("Inconsistency found in station ID: {0}".format(e))
+            logging.error("\tInconsistency found in station ID: {0}".format(e))
             stid = -1
             not_corrupt = False
         try:
             cpid = process_field(dics, 'cp')
         except BadRawacfDataError as e: 
-            logging.error("Inconsistency found in cpid: {0}".format(e))
+            logging.error("\tInconsistency found in cpid: {0}".format(e))
             cpid = -1
             not_corrupt = False
         try:
@@ -263,6 +263,30 @@ def acf_dic(fname):
     stream = f.read()
     dics = backscatter.dmap.parse_dmap_format_from_stream(stream)
     return dics
+
+def globus_connect():
+    """
+    Function for encapsulating the process of connecting to Globus.
+    """
+    _ = subprocess.check_output([GLOBUS_STARTUP_LOC, '-start', '&'])
+
+def globus_query(script_query):
+    """
+    Function to encapsulate the process of making a Globus file request.
+
+    :param script_query: [str] the query to hand Globus 
+    """
+
+    logging.info("Preparing to query: {0}".format(script_query))
+    try:
+        fetch = subprocess.check_output(script_query)
+        logging.info("Fetch request answered with: {0}".format(fetch))
+    except subprocess.CalledProcessError as e:
+        logging.error("\t\tFailed Globus query. Exception given: {0}\n".format(e))
+        logging.exception(e)
+        return
+    except OSError:
+        logging.error("\t\tFailed to call Globus script")
 
 def read_config(cfg_file='config.ini'):
     """
@@ -418,8 +442,9 @@ def clear_endpoint():
     for fil in os.listdir(ENDPOINT):
         try:
             subprocess.call(['rm',ENDPOINT+"/"+fil])
-        except:
+        except Exception as e:
             logging.error("Exception thrown during removal of file {0}".format(fil))
+            logging.exception(e)
 
 def month_year_iterator(start_month, start_year, end_month, end_year):
     """ Found on stackoverflow by user S.Lott.
@@ -487,7 +512,7 @@ def clear_db(cur):
     );
     """) 
 
-def process_experiment(dics, cur, conn):
+def process_experiment(dics, conn):
     """
     Takes a dmap-based list of dicts 'dics' for a SuperDARN experiment
     and enters the key statistics for the experiment into the sqlite
@@ -531,46 +556,8 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         path = sys.argv[1]
         if os.path.isdir(path):
-            clear_db()
+            #clear_db() # whoa there buddy thats a bit rash
             conn = connect_db()
             cur = conn.cursor()
 
 
-    """
-            # parse_rawacf_folder(sys.argv[1], conn)
-            logging.info("Acceptable path. Analysis proceeding...")
-            for fil in os.listdir(path):
-                logging.info("File {0}:".format(fil)) 
-                if fil[-4:] == '.bz2':
-                    dics = bz2_dic(path+'/'+fil)
-                elif fil[-7:] == '.rawacf':
-                    dics = acf_dic(path+'/'+fil)
-                else:
-                    # Could do something with these too?
-                    logging.info('File not used for dmap records.')
-                    continue
-                # If it was a bz2 or rawacf, now we do scripty stuff with dict
-                process_experiment(dics, cur, conn)
-                # Now commit the changes
-                conn.commit()
-
-    # Tests and sample usage
-    cur.execute('select * from exps')
-    tup = cur.fetchall()[0]
-
-    print("Now creating RawacfRecord files")
-    # Test RawacfRecord's class method constructors
-    r1 = RawacfRecord.record_from_dics(dics)
-    r2 = RawacfRecord.record_from_tuple(tup)
-    
-    r2.stid = 90
-    t = r2.start_dt
-    r2.start_dt = dt(t.year, t.month, t.day, t.hour+1, t.minute, t.second)
-    # Test RawacfRecord's save_to_db()
-    r2.save_to_db(cur)
-    # Test __repr__()
-    print(r2)
-
-    dump_db(cur)
-    conn.commit()
-    """

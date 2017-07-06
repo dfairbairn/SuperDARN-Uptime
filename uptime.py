@@ -24,6 +24,7 @@ import rawacf_metadata as rmet
 from rawacf_metadata import two_pad
 
 BAD_RAWACFS_FILE = './bad_rawacfs.txt'
+BAD_CPIDS_FILE = './bad_cpids.txt'
 LOG_FILE = 'uptime.log'
 SEC_IN_DAY = 86400.0
 
@@ -38,16 +39,11 @@ fileHandler = logging.FileHandler("./{0}".format(LOG_FILE))
 fileHandler.setFormatter(logFormatter)
 rootLogger.addHandler(fileHandler)
 
-#consoleHandler = logging.StreamHandler()
-#consoleHandler.setFormatter(logFormatter)
-#rootLogger.addHandler(consoleHandler)
-
-
 # -----------------------------------------------------------------------------
 #                           High-Level Methods 
 # -----------------------------------------------------------------------------
 
-def process_rawacfs_day(year, month, day, station_code=None):
+def process_rawacfs_day(year, month, day, station_code=None, conn=None):
     """
     A function which fetches and processes rawacfs from a particular day
     into the sqlite3 database. Can optionally select a particular day.
@@ -64,11 +60,14 @@ def process_rawacfs_day(year, month, day, station_code=None):
     import subprocess
     import calendar 
 
+    if conn==None:
+        conn = sqlite3.connect("superdarntimes.sqlite")
+
     # If a stid is given to function, then just grab that station's stuff
     all_stids = True if station_code == None else False
 
     # I. Run the globus connect process
-    _ = subprocess.check_output([rmet.GLOBUS_STARTUP_LOC, '-start', '&'])
+    rmet.globus_connect()
 
     # II. Fetch the files
     if all_stids:
@@ -79,21 +78,14 @@ def process_rawacfs_day(year, month, day, station_code=None):
         script_query = [rmet.SYNC_SCRIPT_LOC,'-y', str(year), '-m',
             str(month), '-p', str(year)+two_pad(month)+two_pad(day)+"*"+station_code, 
             rmet.ENDPOINT]
-    logging.info("\t\tPreparing to query: {0}".format(script_query))
-    try:
-        fetch = subprocess.check_output(script_query)
-        logging.info("\t\tFetch request answered with: {0}".format(fetch))
-    except subprocess.CalledProcessError as e:
-        logging.error("\t\tFailed Globus query. Exception given: {0}\n".format(E))
-        return
-    except OSError:
-        logging.error("\t\tFailed to call Globus script")
+    rmet.globus_query(script_query)
 
     # III.
     # B. Parse the rawacf files, save their metadata in our DB
     parse_rawacf_folder(rmet.ENDPOINT, conn=conn)
     logging.info("\t\tDone with parsing {0}-{1}-{2} rawacf data".format(
                  str(year), two_pad(month), two_pad(day)))
+    conn.commit()
 
     # C. Clear the rawacf files that were fetched in this cycle
     try:
@@ -120,12 +112,8 @@ def process_rawacfs_month(year, month, conn=sqlite3.connect("superdarntimes.sqli
     import calendar 
     import rawacf_metadata as rmet
 
-    #date = str(year) + two_pad(month)
-    #logname = 'process_rawacf_{0}.log'.format(date)
-    #logging.basicConfig(filename=logname, level=logging.INFO)
-
     # I. Run the globus connect process
-    _ = subprocess.check_output([rmet.GLOBUS_STARTUP_LOC, '-start', '&'])
+    rmet.globus_connect()
 
     logging.info("Beginning to process Rawacf logs... ")
     
@@ -134,25 +122,15 @@ def process_rawacfs_month(year, month, conn=sqlite3.connect("superdarntimes.sqli
 
     # II. For each day in the month:
     for day in np.arange(1,last_day+1):
-        # Premature completion of script for debugging purposes 29-june-2017
-        #if day > 1:
-        #    logging.info("Completed subset of requested month's rawacf processing.")
-        #    return
 
         logging.info("\tLooking at {0}-{1}-{2}".format(
                      str(year), two_pad(month), two_pad(day)))
+
         # A. First, grab the rawacfs via globus (and wait on it)
         script_query = [rmet.SYNC_SCRIPT_LOC,'-y', str(year), '-m',
             str(month), '-p', str(year)+two_pad(month)+two_pad(day)+"*", rmet.ENDPOINT]
-        logging.info("\t\tPreparing to query: {0}".format(script_query))
-        try:
-            fetch = subprocess.check_output(script_query)
-            logging.info("\t\tFetch request answered with: {0}".format(fetch))
-        except subprocess.CalledProcessError:
-            logging.error("\t\tFailed Globus query. Exception given: {0}\n".format(E))
-            return
-        except OSError:
-            logging.error("\t\tFailed to call Globus script")
+
+        rmet.globus_query(script_query)
 
         # B. Parse the rawacf files, save their metadata in our DB
         parse_rawacf_folder(rmet.ENDPOINT, conn=conn)
@@ -179,27 +157,18 @@ def test_process_rawacfs(conn=sqlite3.connect("superdarntimes.sqlite")):
     :param conn: [sqlite3 connection] to the database
     """
     import subprocess
-    # Test 1: running globusconnect 
-    _ = subprocess.check_output([rmet.GLOBUS_STARTUP_LOC, '-start', '&'])
 
-    # Test 2: perform a globus fetch using the script
+    # Test 1: Globus query
+    rmet.globus_connect()
     script_query = [rmet.SYNC_SCRIPT_LOC,'-y', '2017', '-m',
-        '02', '-p', '20170209.02*sas', rmet.ENDPOINT]
-    logging.info("Preparing to query: {0}".format(script_query))
-    try:
-        fetch = subprocess.check_output(script_query)
-        logging.info("Fetch request answered with: {0}".format(fetch))
-    except subprocess.CalledProcessError:
-        logging.error("\t\tFailed Globus query. Exception given: {0}\n".format(E))
-        return
-    except OSError:
-        logging.error("\t\tFailed to call Globus script")
- 
-    # Test 3: verify that we can parse this stuff
+        '02', '-p', '20170209.0*sas', rmet.ENDPOINT]
+    rmet.globus_query(script_query)
+
+    # Test 2: verify that we can parse this stuff
     parse_rawacf_folder(rmet.ENDPOINT, conn=conn )
     logging.info("Done with parsing 2017-02-09 'sas' rawacf data")
 
-    # Test 4: Clear the rawacf files that we fetched
+    # Test 3: Clear the rawacf files that we fetched
     try:
         rmet.clear_endpoint()
         logging.info("Successfully removed 2017-02-09 'sas' rawacf data")
@@ -216,45 +185,78 @@ def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite")):
                     rawacf files from
     :param conn: [sqlite3 connection] to the database
     """
-    # For now just leave this empty; the stuff in if-main will go here
+    import multiprocessing as mp
     assert(os.path.isdir(folder))
     cur = conn.cursor()
     logging.info("Acceptable path {0}. Analysis proceeding...".format(folder))
+
+    #pool = mp.Pool()
+    #pool.map(parse_file, os.listdir(folder)) # missing folder and index args 
+
+    processes = []
     for i, fil in enumerate(os.listdir(folder)):
-        logging.info("{0} File: {1}".format(i, fil)) 
-        try:
-            if fil[-4:] == '.bz2':
-                dics = rmet.bz2_dic(folder + '/' + fil)
-            elif fil[-7:] == '.rawacf':
-                dics = rmet.acf_dic(folder + '/' + fil)
-            else:
-                # Could do something with these too?
-                logging.info('\tFile {0} not used for dmap records.'.format(fil))
-                continue
-        except backscatter.dmap.DmapDataError as e:
-            err_str = "Error reading dmap from stream - possible record" + \
-                      " corruption. Skipping file {0}".format(fil)
-            logging.error(err_str)
-            # ***ADD TO LIST OF BAD_RAWACFS ***
-            with open(BAD_RAWACFS_FILE, 'a') as f:
-                f.write(fil + ':' + str(e))
-            continue
-         
-        # If it was a bz2 or rawacf, now we do scripty stuff with dict
-        try:
-            r = rmet.process_experiment(dics, cur, conn)
-            if r.not_corrupt == False:
-                raise rmet.BadRawacfDataError('Data anomaly detected with {0}'.format(fil))
-            # Else, log the successful processing
-            logging.info('\tFile {0} processed.'.format(fil))
-        except Exception as e:
-            logging.error("\tException raised during process_experiment: {0}".format(e))
-            # ***ADD TO LIST OF BAD_RAWACFS ***
-            with open(BAD_RAWACFS_FILE, 'a') as f:
-                f.write(fil + ':' + str(e) + '\n')
+        p = mp.Process(target=parse_file, args=(folder, fil, i,))
+        p.start()
+        processes.append(p)
+        #parse_file(folder, fil, index=i)
+
+    for p in processes:
+        p.join()
 
     # Commit the database changes
     conn.commit()
+
+def parse_file(path, fname, index=1):
+    """
+    Takes an individual .rawacf file, tries opening it, tries using 
+    backscatter to parse it, and tries processing the data in to the 
+    sqlite database.
+
+    :param path: [string] path to file
+    :param fname: [string] name of rawacf file
+    [:param index:] [int] number of file in directory. Helpful for logging.
+    """
+    logging.info("{0} File: {1}".format(index, fname)) 
+    try:
+        if fname[-4:] == '.bz2':
+            dics = rmet.bz2_dic(path + '/' + fname)
+        elif fil[-7:] == '.rawacf':
+            dics = rmet.acf_dic(path + '/' + fname)
+        else:
+            logging.info('\t{0} File {1} not used for dmap records.'.format(index, fname))
+            return
+    except backscatter.dmap.DmapDataError as e:
+        err_str = "\t{0} File: {1}: Error reading dmap from stream - possible record" + \
+                  " corruption. Skipping file."
+        logging.error(err_str.format(index, fname))
+        #logging.exception(e)
+
+        # ***ADD TO LIST OF BAD_RAWACFS ***
+        with open(BAD_RAWACFS_FILE, 'a') as f:
+            # Backscatter exceptions have an awkward newline that looks bad in 
+            # logs, so I remove them here
+            e_tmp = str(e).split('\n')
+            e_tmp = reduce(lambda x, y: x+y, e_tmp)
+            f.write(fname + ':"' + str(e_tmp) + '"\n')
+        return
+     
+    # If it was a bz2 or rawacf, now we do scripty stuff with dict
+    try:
+        r = rmet.process_experiment(dics, conn)
+        conn.commit()
+        if r.not_corrupt == False:
+            err_str = '\t{0} File: {1}: Data anomaly detected.'.format(index, fname)
+            raise rmet.BadRawacfDataError(err_str)
+        # Else, log the successful processing
+        logging.info('\t{0} File  {1}: File processed.'.format(index, fname))
+    except Exception as e:
+        err_str = "\t{0} File {1}: Exception raised during process_experiment: {2}"
+        logging.error(err_str.format(index, fname, e))
+        #logging.exception(e)
+        # ***ADD TO LIST OF BAD_RAWACFS ***
+        with open(BAD_CPIDS_FILE, 'a') as f:
+            f.write(fname + ':' + str(e) + '\n')
+
 
 # -----------------------------------------------------------------------------
 #                           POST PROCESSING METHODS

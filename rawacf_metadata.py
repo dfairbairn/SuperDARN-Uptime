@@ -107,7 +107,7 @@ class RawacfRecord(object):
         :returns: total difference in seconds of end time minus start time
         """
         # datetimes can be subtracted to get intervals
-        diff = end_dt - start_dt
+        diff = self.end_dt - self.start_dt
         return diff.total_seconds()
 
     def save_to_db(self, cur):
@@ -364,7 +364,7 @@ def get_datestr(dt_obj):
     
     :returns: a [str] of format yyyymmdd
     """
-    return str(dt_obj.year) + str(dt_obj.month) + str(dt_obj.day)
+    return str(dt_obj.year) + two_pad(dt_obj.month) + two_pad(dt_obj.day)
 
 def get_timestr(dt_obj):
     """
@@ -398,7 +398,14 @@ def iso_to_dt(iso):
     yr,mo,dy = map(int,(iso.split("T")[0]).split('-'))
     hr,mt,sc = (iso.split("T")[1]).split(':')
     hr, mt = map(int, [hr, mt])
-    sc, us = map(int, sc.split('.'))
+    # In some exceptional cases there are no us, so handle this carefully
+    if len(sc.split('.')) == 1:
+        # Case where there's no microseconds
+        logging.debug("No microseconds!")
+        sc = int(sc)
+        us = 0
+    else:
+        sc, us = map(int, sc.split('.'))
     out = dt(yr, mo, dy, hr, mt, sc, us)
     return out
 
@@ -507,6 +514,7 @@ def select_exps(sql_select, cur):
     records = []
     for entry in entries:
         # Do construction of experiment object from SQL output
+        logging.debug("Looking at entry: {0}".format(entry))
         records.append(RawacfRecord.record_from_tuple(entry))
     return records
 

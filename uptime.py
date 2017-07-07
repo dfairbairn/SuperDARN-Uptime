@@ -86,11 +86,10 @@ def stats_month(year, month, cur, stid=5):
     Calculates uptime stats for the entire month 
     """
     last_day = calendar.monthrange(year, month)[1]
-    days = map(rut.two_pad, np.arange(1, last_day + 1))
+    days = np.arange(1, last_day + 1)
     day_stats = []
-    for d in days:
-        date_str = str(year) + rut.two_pad(month) + d
-        day_stats.append(stats_day(date_str, cur, stid)) 
+    for day in days:
+        day_stats.append(stats_day(year, month, day, cur, stid)) 
     return day_stats
 
 #------------------------------------------------------------------------------ 

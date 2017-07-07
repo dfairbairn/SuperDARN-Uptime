@@ -169,13 +169,13 @@ class RawacfRecord(object):
         try:
             stid = process_field(dics, 'stid')
         except BadRawacfDataError as e:
-            logging.error("\tInconsistency found in station ID: {0}".format(e))
+            logging.debug("\tInconsistency found in station ID: {0}".format(e))
             stid = -1
             not_corrupt = False
         try:
             cpid = process_field(dics, 'cp')
         except BadRawacfDataError as e: 
-            logging.error("\tInconsistency found in cpid: {0}".format(e))
+            logging.debug("\tInconsistency found in cpid: {0}".format(e))
             cpid = -1
             not_corrupt = False
         try:
@@ -188,7 +188,7 @@ class RawacfRecord(object):
                 cmd_name = cmd.split(' ',1)[0]
                 cmd_args = cmd.split(' ',1)[1]
         except BadRawacfDataError:
-            logging.error("Inconsistency found in origin command")
+            logging.debug("Inconsistency found in origin command")
             cmd_name = "<UnknownCommand>"
             cmd_args = ""
             not_corrupt = False
@@ -489,7 +489,31 @@ def connect_db(dbname="superdarntimes.sqlite"):
     expected to only take on values of "1" or "0" ***
     """
     #TODO:  maybe should check that it has the right structure?
+    
     conn = sqlite3.connect(dbname)
+    cur = conn.cursor()
+    cur.executescript("""
+    CREATE TABLE IF NOT EXISTS exps (
+    stid integer NOT NULL,
+    start_iso text NOT NULL,
+    end_iso text NOT NULL,
+    cpid integer NOT NULL,
+    cmd_name text NOT NULL,
+    cmd_args text,
+    nave_pos BOOLEAN,
+    times_consistent BOOLEAN,
+    PRIMARY KEY (stid, start_iso)
+    );
+    """) 
+    # And if it *did* exist, make sure it has all the necessary fields:
+    cur.execute('PRAGMA table_info (exps)')
+    flds = ['stid', 'start_iso', 'end_iso', 'cpid', 'cmd_name', 'cmd_args', 
+            'nave_pos', 'times_consistent']
+    tbl_flds = [ en[1] for en in cur.fetchall() ]
+    for f in flds:
+        if f not in tbl_flds:
+            logging.error("Database incorrectly configured.")
+            return None
     return conn
 
 def clear_db(cur):

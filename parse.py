@@ -246,15 +246,15 @@ def parse_file(path, fname, index=1):
         r = rut.process_experiment(dics, conn)
         conn.commit()
         if r.not_corrupt == False:
-            err_str = '\t{0} File: {1}: Data anomaly detected.'.format(index, fname)
+            err_str = 'Data inconsistency encountered in rawacf file.'.format(index, fname)
             raise rut.BadRawacfDataError(err_str)
         # Else, log the successful processing
         logging.info('\t{0} File  {1}: File processed.'.format(index, fname))
     except Exception as e:
         err_str = "\t{0} File {1}: Exception raised during process_experiment: {2}"
-        logging.error(err_str.format(index, fname, e))
+        logging.warning(err_str.format(index, fname, e))
         #logging.exception(e)
-        # ***ADD TO LIST OF BAD_RAWACFS ***
+        # ***ADD TO LIST OF BAD_CPIDS ***
         with open(BAD_CPIDS_FILE, 'a') as f:
             f.write(fname + ':' + str(e) + '\n')
 
@@ -281,15 +281,12 @@ def get_args():
 
     parser.add_argument("-f", "--fname", help="Indicate a filename to process")
 
-
     # For now, we require a particular station to be requested
     parser.add_argument("-c", "--station_code", 
                         help="SuperDARN Station Code you want stats for (e.g. 'sas')")
 
     parser.add_argument("-q", "--quiet", help="Use quiet mode",
                         action="store_true")
-
-
     args = parser.parse_args()
     return args
 

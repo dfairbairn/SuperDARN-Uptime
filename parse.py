@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+# coding: utf-8
 """
 file: 'parse.py'
 description:
@@ -14,12 +16,11 @@ date: July 6 2017
 
 import logging
 import os
-import sys
 
-import dateutil.parser
 from datetime import datetime as dt
 import numpy as np
 import sqlite3
+import argparse
 
 import backscatter 
 import rawacf_utils as rut
@@ -27,8 +28,7 @@ from rawacf_utils import two_pad
 
 BAD_RAWACFS_FILE = './bad_rawacfs.txt'
 BAD_CPIDS_FILE = './bad_cpids.txt'
-LOG_FILE = 'uptime.log'
-SEC_IN_DAY = 86400.0
+LOG_FILE = 'parse.log'
 
 logging.basicConfig(level=logging.DEBUG,
     format='%(levelname)s %(asctime)s: %(message)s', 
@@ -66,7 +66,7 @@ def process_rawacfs_day(year, month, day, station_code=None, conn=None):
         conn = sqlite3.connect("superdarntimes.sqlite")
 
     # If a stid is given to function, then just grab that station's stuff
-    all_stids = True if station_code == None else False
+    all_stids = True if station_code is None else False
 
     # I. Run the globus connect process
     rut.globus_connect()
@@ -258,16 +258,118 @@ def parse_file(path, fname, index=1):
         with open(BAD_CPIDS_FILE, 'a') as f:
             f.write(fname + ':' + str(e) + '\n')
 
+#------------------------------------------------------------------------------ 
+#                       Command-Line Usability
+#------------------------------------------------------------------------------ 
+
+def get_args():
+    """
+    Parse the command-line arguments.
+
+    Yes, in an ideal world, this whole thing would be a sweet little 
+    object which does things on initialization, but at least for now,
+    this works as a stand-alone function!
+    """
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-y", "--rec_year", help="Year you wish to process records for",
+                        type=int)
+    parser.add_argument("-m", "--rec_month", help="Month you wish to process records for",
+                        type=int)
+    parser.add_argument("-d", "--rec_day", help="Day you wish to process records for",
+                        type=int)
+    parser.add_argument("-p", "--directory", help="Indicate a directory to parse rawacfs in")
+
+    parser.add_argument("-f", "--fname", help="Indicate a filename to process")
+
+
+    # For now, we require a particular station to be requested
+    parser.add_argument("-c", "--station_code", 
+                        help="SuperDARN Station Code you want stats for (e.g. 'sas')")
+
+    parser.add_argument("-q", "--quiet", help="Use quiet mode",
+                        action="store_true")
+
+
+    args = parser.parse_args()
+    return args
+
+def process_args(year, month, day, st_code, directory, fname):
+    """
+    Function which handles interpreting what kind of processing request
+    to make.
+    """
+    # Highest precedence: if a particular file is provided as an arg.
+    if fname is not None:
+        if os.path.isfile(fname):
+            logging.info("Parsing file {0}".format(fname))
+            #parse_file(os.path.dirname(fname), os.path.basename(fname))
+            return
+        else:
+            logging.error("Invalid filename.")
+
+    # Next level of precedence: if a directory is supplied
+    if directory is not None:
+        if os.path.isdir(directory): 
+            logging.info("Parsing files in directory {0}".format(directory))
+            #parse_rawacf_folder(directory)
+            return
+        else:
+            logging.error("Invalid directory.")
+
+    if year is not None and month is not None:
+        # Next check if a day was provided
+        if day is not None:
+            msg = "Proceeding to fetch and parse data from {0}-{1}-{2}"
+            logging.info(msg.format(year, month, day))
+            logging.info("By the way, station code supplied to this was: '{0}'".format(st_code))
+            #process_rawacfs_day(year, month, day, station_code=st_code)
+            return
+        else:
+            msg = "Proceeding to fetch and parse data in {0}-{1}"
+            logging.info(msg.format(year, month))
+            #process_rawacfs_month(year, month)
+            return
+    else:
+        logging.info("Some form of argument is kinda required!")
+
+def initialize_logger(quiet_mode):
+    """
+    Function for setting up the initial logging parameters
+
+    :param use_verbose: [boolean] flag indicating whether to be verbose.
+        ** If _not_ running parse/fetch requests from the command-line **
+    """
+    level = logging.WARNING if quiet_mode else logging.DEBUG
+
+    logging.basicConfig(level=level,
+        format='%(levelname)s %(asctime)s: %(message)s', 
+        datefmt='%m/%d/%Y %I:%M:%S %p')
+ 
+    logFormatter = logging.Formatter('%(levelname)s %(asctime)s: %(message)s')
+    rootLogger = logging.getLogger()
+    rootLogger.setLevel(level)
+
+    fileHandler = logging.FileHandler("./{0}".format(LOG_FILE))
+    fileHandler.setFormatter(logFormatter)
+    rootLogger.addHandler(fileHandler)
+
+#------------------------------------------------------------------------------ 
+
 if __name__ == "__main__":
+    args = get_args()
+
+    year = args.rec_year
+    month = args.rec_month
+    day = args.rec_day
+    st_code = args.station_code
+    directory = args.directory
+    fname = args.fname
+    quietness_mode = args.quiet
+    
+    initialize_logger(quietness_mode)
+
     rut.read_config() 
     conn = rut.connect_db()
     cur = conn.cursor()
-    cur.execute('select * from exps')
-    tup = cur.fetchall()[0]
-
-    print("Now creating RawacfRecord files")
-    # Test RawacfRecord's class method constructors
-    r2 = rut.RawacfRecord.record_from_tuple(tup)
-    t = rut.get_tod_seconds(r2.start_dt)
-
-
+    process_args(year, month, day, st_code, directory, fname)
+    

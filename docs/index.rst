@@ -4,19 +4,99 @@
    contain the root `toctree` directive.
 
 Welcome to uptime's documentation!
-==================================
+++++++++++++++++++++++++++++++++++
 
 Introduction
-------------
-<dummy>
+============
+This project provides scripts for fetching and processing SuperDARN experiment 
+metadata and calculating basic statistics from these processed records.
+
+A detailed log of events during fetching, parsing, and processing is maintained 
+as well as a separately compiled list of SuperDARN .rawacf files which showed 
+signs of data corruption or otherwise unusual behaviour.
 
 Installation
-------------
-<dummy>
+============
+This script uses a number of basic Python packages as well as two crucial 
+specialized modules. It's highly recommended to make use of the python Virtual
+Environments package 'virtualenv' so as to create a convenient local 
+environment for this script.
+Read more here: http://docs.python-guide.org/en/latest/dev/virtualenvs/
+
+Specialized module #1 is *backscatter*. It's used for its ability to read
+.rawacf files and retrieve their metadata (backscatter.dmap). Follow 
+installation procedure here: http://backscatter.readthedocs.io/en/latest/
+
+Specialized module #2 is the *sync_radar_data_globus.py* script. This script
+is used to perform data fetch requests in order to bring in, parse, and save
+SuperDARN record metadata to a database locally. **This requires that you
+have a Globus account with access to the SuperDARN Globus endpoints, with 
+Globus configured locally!** See how to do this here: 
+https://github.com/SuperDARNCanada/globus
+
+To summarize, the regular ol' python packages you'll need are:
+- numpy
+- sqlite3
+- calendar
+- dateutil
+- configparser
+- argparse < built-in? >
+- logging < built-in? >
+
+And the specialized packages you'll need are:
+- backscatter (see here: 
+- a script for performing 
+
+Note to self - #TODO: Make a setup.py file
 
 Usage
------
-<dummy>
+=====
+The files 'parse.py' and 'uptime.py' are written so as to be usable either
+from the command-line or from other python scripts. The python package 
+'argparse' was used, which includes help prompts at the command-line.
+
+Use of 'uptime.py' for calculating uptime statistics (assuming the 
+'superdarntimes.sqlite' file has already been filled with records for the 
+desired period using parse.py) is done like so:
+
+> uptime.py -y 2017 -m 3 -d 28 -i 5
+[ Uses uptime.py's "stats_day()" method to take a SuperDARN radar ID and a 
+specific year, month, and day, looks through all the SuperDARN records in the 
+superdarntimes.sqlite database, and computes the uptime for that day. SuperDARN 
+radar IDs are numbers as shown here: 
+http://superdarn.ca/news/item/58-sd-radar-list ] 
+
+> uptime.py -y 2017 -m 3 -i 5
+[ Similar to the previous example, but uses uptime.py's "stats_month()" which
+calls multiple runs of "stats_day()" 
+
+Command-line usage of 'parse.py' for fetching and processing SuperDARN record
+data is done like so:
+
+> parse.py -y 2017 -m 3
+[ This calls parse.py's method "process_rawacfs_month()" with 2017, 3, as
+parameters for year, and month, respectively. This method will iterate through
+each day in the month of 2017-03, requesting _all_ SuperDARN .rawacf for that
+day. ]
+
+> parse.py -y 2017 -m 3 -d 29 -c sas
+[ This run is comparable to the previous, but illustrates that two optional 
+parameters can be provided to fetch and process a smaller dataset. The -d
+option specifies a particular day of the month, while the -c option can be used
+to specify a particular SuperDARN radar code (for SuperDARN data codes, see
+here: http://superdarn.ca/news/item/58-sd-radar-list ]
+
+
+> parse.py -f data/20170601.2001.00.cly.rawacf.bz2
+[ This calls parse.py's method "parse_file()" on the specified file, which
+will only read the file and save its metadata to the superdarntimes.sqlite 
+database. ]
+
+> parse.py -d data/
+[ This calls parse.py's method "parse_rawacfs_folder()" on the specified 
+directory, which will only read the files already in the directory and save 
+their metadata to the superdarntimes.sqlite database. ]
+
 
 .. toctree::
    :maxdepth: 2

@@ -39,17 +39,28 @@ See how to do this here:
 https://github.com/SuperDARNCanada/globus
 
 To summarize, the regular ol' python packages you'll need are:
+
 - numpy
+
 - sqlite3
+
 - calendar
+
 - dateutil
+
 - configparser
+
 - multiprocessing
+
 - argparse < built-in? >
+
 - logging < built-in? >
 
+
 And the specialized packages you'll need are:
+
 - backscatter (see here: 
+
 - a script for performing 
 
 Note to self - #TODO: Make a setup.py file
@@ -67,14 +78,18 @@ Use of 'uptime.py' for calculating uptime statistics (assuming the
 'superdarntimes.sqlite' file has already been filled with records for the 
 desired period using parse.py) is done like so:
 
+
 > uptime.py -y 2017 -m 3 -d 28 -i 5
+
 Uses uptime.py's "stats_day()" method to take a SuperDARN radar ID and a 
 specific year, month, and day, looks through all the SuperDARN records in the 
 superdarntimes.sqlite database, and computes the uptime for that day. SuperDARN 
 radar IDs are numbers as shown here: 
 http://superdarn.ca/news/item/58-sd-radar-list 
 
+
 > uptime.py -y 2017 -m 3 -i 5
+
 Similar to the previous example, but uses uptime.py's "stats_month()" which
 calls multiple runs of "stats_day()"
 
@@ -84,12 +99,15 @@ Command-line usage of 'parse.py' for fetching and processing SuperDARN record
 data is done like so:
 
 > parse.py -y 2017 -m 3
+
 This calls parse.py's method "process_rawacfs_month()" with 2017, 3, as
 parameters for year, and month, respectively. This method will iterate through
 each day in the month of 2017-03, requesting _all_ SuperDARN .rawacf for that
 day.
 
+
 > parse.py -y 2017 -m 3 -d 29 -c sas
+
 This run is comparable to the previous, but illustrates that two optional 
 parameters can be provided to fetch and process a smaller dataset. The -d
 option specifies a particular day of the month, while the -c option can be used
@@ -99,9 +117,10 @@ here: http://superdarn.ca/news/item/58-sd-radar-list
 
 > parse.py -f data/20170601.2001.00.cly.rawacf.bz2
 
-[ This calls parse.py's method "parse_file()" on the specified file, which
+ This calls parse.py's method "parse_file()" on the specified file, which
 will only read the file and save its metadata to the superdarntimes.sqlite 
 database.
+
 
 > parse.py -d data/
 

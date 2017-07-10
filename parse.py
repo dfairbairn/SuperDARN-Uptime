@@ -33,6 +33,7 @@ from datetime import datetime as dt
 import numpy as np
 import sqlite3
 import argparse
+import time
 
 import backscatter 
 import rawacf_utils as rut
@@ -174,7 +175,7 @@ def test_process_rawacfs(conn=sqlite3.connect("superdarntimes.sqlite")):
     # Test 1: Globus query
     rut.globus_connect()
     script_query = [rut.SYNC_SCRIPT_LOC,'-y', '2017', '-m',
-        '02', '-p', '20170209.0*sas', rut.ENDPOINT]
+        '02', '-p', '20170209.0*zho', rut.ENDPOINT]
     rut.globus_query(script_query)
 
     # Test 2: verify that we can parse this stuff
@@ -188,7 +189,39 @@ def test_process_rawacfs(conn=sqlite3.connect("superdarntimes.sqlite")):
 
     except subprocess.CalledProcessError:
         logging.error("\t\tUnable to remove files")
- 
+
+def process_file(fname):
+    """
+    Essentially a wrapper for using parse_file that handles some possible 
+    exceptions. This function is only used if you call the script to just
+    process a particular file. (so its efficiency isn't as critical fyi)
+    
+    :param f: file name including path.
+    """
+    # Start exception handler/write handler
+    exc_msg_queue = mp.Queue()
+    write_handler = mp.Process(target=write_handler_func, args=( exc_msg_queue))
+    write_handler.start()
+    output_rec_queue = mp.Queue() 
+    try:
+        dummy_index = 1
+        p = mp.Process(target=parse_file, args=(folder, fil, exc_msg_queue, 
+                       dummy_index, output_rec_queue))
+
+    except backscatter.dmap.DmapDataError as e:
+        err_str = "\t{0} File: {1}: Error reading dmap from stream - possible record" + \
+                  " corruption. Skipping file."
+        logging.error(err_str.format(index, fname))
+        return
+
+    except rut.InconsistentRawacfError as e:
+        err_str = "\t{0} File {1}: Exception raised during process_experiment: {2}"
+        logging.warning(err_str.format(index, fname, e))
+    p.join()
+    dic = output_rec_queue.get()
+    r.save_to_db() 
+
+
 def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite")):
     """
     Takes a path to a folder which contains of .rawacf files, parses them
@@ -203,73 +236,150 @@ def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite")):
     cur = conn.cursor()
     logging.info("Acceptable path {0}. Analysis proceeding...".format(folder))
 
-    #pool = mp.Pool()
-    #pool.map(parse_file, os.listdir(folder)) # missing folder and index args 
-
     processes = []
-    for i, fil in enumerate(os.listdir(folder)):
-        p = mp.Process(target=parse_file, args=(folder, fil, i,))
-        p.start()
-        processes.append(p)
-        #parse_file(folder, fil, index=i)
+    output_rec_queue = mp.Queue()
 
+    # Start exception handler/write handler
+    exc_msg_queue = mp.Queue()
+    write_handler = mp.Process(target=write_handler_func, args=( exc_msg_queue,))
+    write_handler.start()  
+ 
+    # Start workers 
+    for i, fil in enumerate(os.listdir(folder)):
+        p = mp.Process(target=parse_file, args=(folder, fil, exc_msg_queue, 
+                       i, output_rec_queue))
+        processes.append(p)
+        p.start()
+   
+    # Wait for processes to end 
     for p in processes:
         p.join()
+    time.sleep(1)
+    write_handler.terminate() 
+
+    # Look through outputted records, saving to the database
+    outputs = output_rec_queue.get()
+    while not output_rec_queue.empty():
+        # Integrate all the single index:record dictionaries together
+        dic = output_rec_queue.get()
+        outputs.update(dic)
+        # Save to the database
+        assert(len(dic.values()) == 1) 
+        rec = dic.values()[0]
+        rec.save_to_db(cur)
+        conn.commit() # Do I have to do this everytime?
 
     # Commit the database changes
     conn.commit()
 
-def parse_file(path, fname, index=1):
+def parse_file(path, fname, exc_msg_queue, index, output_rec_queue):
     """
     Takes an individual .rawacf file, tries opening it, tries using 
-    backscatter to parse it, and tries processing the data in to the 
-    sqlite database.
+    backscatter to parse it, and if successful at this, constructs a 
+    RawacfRecord object and returns it.
 
     :param path: [string] path to file
     :param fname: [string] name of rawacf file
     [:param index:] [int] number of file in directory. Helpful for logging.
+
+    :returns: A RawacfRecord constructed using RawacfRecord.record_from_dics
+                on a list of dictionaries assembled using 'backscatter'.
     """
+    # I. Open File / Read with Backscatter
     logging.info("{0} File: {1}".format(index, fname)) 
     try:
         if fname[-4:] == '.bz2':
             dics = rut.bz2_dic(path + '/' + fname)
-        elif fil[-7:] == '.rawacf':
+        elif fname[-7:] == '.rawacf':
             dics = rut.acf_dic(path + '/' + fname)
         else:
             logging.info('\t{0} File {1} not used for dmap records.'.format(index, fname))
             return
+
     except backscatter.dmap.DmapDataError as e:
         err_str = "\t{0} File: {1}: Error reading dmap from stream - possible record" + \
                   " corruption. Skipping file."
         logging.error(err_str.format(index, fname))
-        #logging.exception(e)
-
-        # ***ADD TO LIST OF BAD_RAWACFS ***
-        with open(BAD_RAWACFS_FILE, 'a') as f:
-            # Backscatter exceptions have an awkward newline that looks bad in 
-            # logs, so I remove them here
-            e_tmp = str(e).split('\n')
-            e_tmp = reduce(lambda x, y: x+y, e_tmp)
-            f.write(fname + ':"' + str(e_tmp) + '"\n')
+        # Tell the write handler to add this to the list of bad rawacf files
+        exc_msg_queue.put((fname, e))
         return
-     
-    # If it was a bz2 or rawacf, now we do scripty stuff with dict
+
+    # II. Make rawacf record and check the data's okay     
     try:
-        r = rut.process_experiment(dics, conn)
-        conn.commit()
+        r = rut.RawacfRecord.record_from_dics(dics)
         if r.not_corrupt == False:
             err_str = 'Data inconsistency encountered in rawacf file.'.format(index, fname)
-            raise rut.BadRawacfDataError(err_str)
-        # Else, log the successful processing
+            raise rut.InconsistentRawacfError(err_str)
         logging.info('\t{0} File  {1}: File processed.'.format(index, fname))
-    except Exception as e:
+
+    except rut.InconsistentRawacfError as e:
         err_str = "\t{0} File {1}: Exception raised during process_experiment: {2}"
         logging.warning(err_str.format(index, fname, e))
-        #logging.exception(e)
-        # ***ADD TO LIST OF BAD_CPIDS ***
-        with open(BAD_CPIDS_FILE, 'a') as f:
-            f.write(fname + ':' + str(e) + '\n')
+        # Tell the write handler to add this to the list of files with bad CPIDS 
+        exc_msg_queue.put((fname, e))
 
+    # III. Output record
+    if output_rec_queue is not None:
+        # If multiprocessing, use an output dictionary
+        dic = {index: r}
+        output_rec_queue.put(dic)
+        return
+    else:
+        # Then just a single file was being parsed
+        return r
+  
+def write_handler_func(exc_msg_queue):
+    """
+    Function for doing the writing to bad_rawacfs.txt and bad_cpids.txt to 
+    avoid race conditions between worker processes.
+
+    :param exc_msg_queue: [multiprocessing.Queue] that provides a medium
+                        for processes to send (rawacf_filename, exception)
+                        tuples to handler for printing.
+    """
+    while True:
+        if exc_msg_queue.empty():
+            time.sleep(0.1)
+        else:
+            try:
+                logging.info("Message received!")
+                fname, exc = exc_msg_queue.get()
+                if type(exc) == rut.InconsistentRawacfError:
+                    write_inconsistent_rawacf(fname, exc)
+                elif type(exc) == backscatter.dmap.DmapDataError:
+                    write_bad_rawacf(fname, exc)
+            except TypeError:
+                logging.error("Write handler had trouble unpacking message!")
+            except IOError:
+                logging.error("Write handler had trouble writing!")
+
+def write_inconsistent_rawacf(fname, exc):
+    """
+    Performs the actual writing to the bad_cpids.txt file.
+
+    :param fname: [str] filename that had inconsistent fields in it
+    :param exc: [rawacf_utils.InconsistentRawacfError] exception object
+    """
+    # ***ADD TO LIST OF BAD_CPIDS ***
+    with open(BAD_CPIDS_FILE, 'a') as f:
+        f.write(fname + ':' + str(exc) + '\n')
+
+def write_bad_rawacf(fname, exc): 
+    """
+    Performs the actual writing to the bad_rawacfs.txt file.
+
+    :param fname: [str] filename that couldn't be opened by backscatter 
+    :param exc: [backscatter.dmap.DmapDataError] exception object
+   
+    """
+    # ***ADD TO LIST OF BAD_RAWACFS ***
+    with open(BAD_RAWACFS_FILE, 'a') as f:
+        # Backscatter exceptions have a newline that looks bad in 
+        # logs, so I remove them here
+        exc_tmp = str(exc).split('\n')
+        exc_tmp = reduce(lambda x, y: x+y, exc_tmp)
+        f.write(fname + ':"' + str(exc_tmp) + '"\n')
+ 
 #------------------------------------------------------------------------------ 
 #                       Command-Line Usability
 #------------------------------------------------------------------------------ 
@@ -311,7 +421,7 @@ def process_args(year, month, day, st_code, directory, fname):
     if fname is not None:
         if os.path.isfile(fname):
             logging.info("Parsing file {0}".format(fname))
-            #parse_file(os.path.dirname(fname), os.path.basename(fname))
+            process_file(fname)
             return
         else:
             logging.error("Invalid filename.")

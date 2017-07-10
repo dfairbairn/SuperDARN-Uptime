@@ -1,5 +1,5 @@
 """
-file: 'rawacf_metadata.py'
+file: 'rawacf_utils.py'
 description:
     This file (currently) contains all the methods and objects used 
     for parsing rawacf files, storing the experiment metadata in an 
@@ -27,13 +27,12 @@ logging.basicConfig(level=logging.DEBUG,
     format='%(levelname)s %(asctime)s: %(message)s', 
     datefmt='%m/%d/%Y %I:%M:%S %p')
 
-class BadRawacfDataError(Exception):
+class InconsistentRawacfError(Exception):
     """
     Raised when data from a rawacf file is inconsistent or incorrectly
     formatted, e.g. when a field which should be constant (e.g. origin 
     cmd) is inconsistent throughout a record.
     """
-    pass 
 
 class RawacfRecord(object):
     """
@@ -119,12 +118,17 @@ class RawacfRecord(object):
         """
         start_time = (self.start_dt).isoformat()
         end_time = (self.end_dt).isoformat()
-        cur.execute('''INSERT INTO exps (stid, start_iso, end_iso, 
-        cpid, cmd_name, cmd_args, nave_pos, times_consistent) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-        (self.stid, start_time, end_time, 
-        self.cpid, self.cmd_name, self.cmd_args, 
-        int(self.nave_pos), int(self.times_consistent)))
+        try:
+            cur.execute('''INSERT INTO exps (stid, start_iso, end_iso, 
+            cpid, cmd_name, cmd_args, nave_pos, times_consistent) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+            (self.stid, start_time, end_time, 
+            self.cpid, self.cmd_name, self.cmd_args, 
+            int(self.nave_pos), int(self.times_consistent)))
+        except sqlite3.IntegrityError:
+            logging.error("Unique constraint failed or something.")     
+        except sqlite3.OperationalError: 
+            logging.error("\t\tDatabase locked - can't save metadata!")
 
     # Class method to read a tuple from the sqlite db and make a RawacfRecord
     @classmethod
@@ -168,13 +172,13 @@ class RawacfRecord(object):
         # Parse the <theoretically> constant parameters for the experiment
         try:
             stid = process_field(dics, 'stid')
-        except BadRawacfDataError as e:
+        except InconsistentRawacfError as e:
             logging.debug("\tInconsistency found in station ID: {0}".format(e))
             stid = -1
             not_corrupt = False
         try:
             cpid = process_field(dics, 'cp')
-        except BadRawacfDataError as e: 
+        except InconsistentRawacfError as e: 
             logging.debug("\tInconsistency found in cpid: {0}".format(e))
             cpid = -1
             not_corrupt = False
@@ -187,7 +191,7 @@ class RawacfRecord(object):
             else:
                 cmd_name = cmd.split(' ',1)[0]
                 cmd_args = cmd.split(' ',1)[1]
-        except BadRawacfDataError:
+        except InconsistentRawacfError:
             logging.debug("Inconsistency found in origin command")
             cmd_name = "<UnknownCommand>"
             cmd_args = ""
@@ -352,7 +356,7 @@ def process_field(dics, field):
         if i[field] != val:
             dbg_str = "process_field() was seeing record of {0}".format(val)
             dbg_str += " for '{0}' but now sees {1}".format(field, i[field])
-            raise BadRawacfDataError(dbg_str)
+            raise InconsistentRawacfError(dbg_str)
     return val
 
 def has_positive_nave(dics):
@@ -544,12 +548,6 @@ def process_experiment(dics, conn):
     """
     cur = conn.cursor()
     r = RawacfRecord.record_from_dics(dics)
-    try:
-        r.save_to_db(cur)
-    except sqlite3.IntegrityError:
-        logging.error("Unique constraint failed or something.")     
-    except sqlite3.OperationalError: 
-        logging.error("\t\tDatabase locked - can't save metadata!")
     return r
 
 def select_exps(sql_select, cur):

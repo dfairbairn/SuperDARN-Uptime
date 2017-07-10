@@ -10,6 +10,18 @@ description:
     The methods contained herein can also be used externally to 
     perform these high-level processing functions.
 
+    * Note *
+    Two additional files are associated with the parsing performed on
+    .rawacf files. The files 'bad_rawacfs.txt' and 'bad_cpids.txt' are
+    created in the working directory after parsing runs that yield
+    parsing errors. 
+    
+    The latter file contains names of files which indicate inconsistent
+    readings of fields (which has thus far only been observed to occur
+    with the CPID field in 'han', 'zho', and 'hkw' radar .rawacfs. The
+    former file contains names of files which couldn't be read using
+    the 'backscatter' library, as well as the exceptions they threw.
+
 author: David Fairbairn
 date: July 6 2017
 """

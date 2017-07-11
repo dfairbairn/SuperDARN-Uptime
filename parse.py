@@ -190,14 +190,13 @@ def process_file(fname):
     :param f: file name including path.
     """
     # Start exception handler/write handler
-    exc_msg_queue = mp.Queue()
+    manager = mp.Manager()
+    exc_msg_queue = manager.Queue()
     write_handler = mp.Process(target=exc_handler_func, args=( exc_msg_queue))
     write_handler.start()
-    output_rec_queue = mp.Queue() 
     try:
         dummy_index = 1
-        p = mp.Process(target=parse_file, args=(folder, fil, exc_msg_queue, 
-                       dummy_index, output_rec_queue))
+        r = parse_file(folder, fil, dummy_index, exc_msg_queue)
 
     except backscatter.dmap.DmapDataError as e:
         err_str = "\t{0} File: {1}: Error reading dmap from stream - possible record" + \
@@ -208,10 +207,8 @@ def process_file(fname):
     except rut.InconsistentRawacfError as e:
         err_str = "\t{0} File {1}: Exception raised during process_experiment: {2}"
         logging.warning(err_str.format(index, fname, e))
-    p.join()
-    dic = output_rec_queue.get()
     r.save_to_db() 
-
+    return r
 
 def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite")):
     """
@@ -223,47 +220,48 @@ def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite")):
     :param conn: [sqlite3 connection] to the database
     """
     import multiprocessing as mp
+    import itertools
     assert(os.path.isdir(folder))
     cur = conn.cursor()
     logging.info("Acceptable path {0}. Analysis proceeding...".format(folder))
 
     processes = []
-    output_rec_queue = mp.Queue()
 
     # Start exception handler/write handler
-    exc_msg_queue = mp.Queue()
+    manager = mp.Manager()
+    exc_msg_queue = manager.Queue()
     write_handler = mp.Process(target=exc_handler_func, args=( exc_msg_queue,))
     write_handler.start()  
- 
-    # Start workers 
-    for i, fil in enumerate(os.listdir(folder)):
-        p = mp.Process(target=parse_file, args=(folder, fil, exc_msg_queue, 
-                       i, output_rec_queue))
-        processes.append(p)
-        p.start()
-   
-    # Wait for processes to end 
-    for p in processes:
-        p.join(SUBPROC_JOIN_TIMEOUT)
-    time.sleep(SHORT_SLEEP_INTERVAL*5)
+
+    # Assemble a bundle of arguments for mp.pool to use 
+    files = os.listdir(folder) 
+    file_indices = np.arange(1, len(files)+1) 
+    arg_bundle = itertools.izip(itertools.repeat(folder), files, file_indices,
+                itertools.repeat(exc_msg_queue))
+  
+    # Set the pool to work
+    logging.debug("Beginning a pool multiprocessing of the files...") 
+    pool = mp.Pool()
+    recs = pool.map(parse_file_wrapper, arg_bundle)
+    logging.debug("Done with multiprocessing of files (supposedly)")
+       
     write_handler.terminate() 
 
-    # Look through outputted records, saving to the database
-    outputs = output_rec_queue.get()
-    while not output_rec_queue.empty():
-        # Integrate all the single index:record dictionaries together
-        dic = output_rec_queue.get()
-        outputs.update(dic)
-        # Save to the database
-        assert(len(dic.values()) == 1) 
-        rec = dic.values()[0]
-        rec.save_to_db(cur)
-        conn.commit() # Do I have to do this everytime?
+    num_uncounted = 0
+    for rec in recs:
+        if rec is not None:
+            rec.save_to_db(cur)
+            conn.commit()
+        else:
+            num_uncounted += 1
+            logging.debug("Found an instance of a None record!")
 
+    done_str = "Done with processing files in folder. {0} / {1} were saved to the database."
+    logging.info(done_str.format(len(files) - num_uncounted, len(files))) 
     # Commit the database changes
     conn.commit()
 
-def parse_file(path, fname, exc_msg_queue, index, output_rec_queue):
+def parse_file(path, fname, index, exc_msg_queue):
     """
     Takes an individual .rawacf file, tries opening it, tries using 
     backscatter to parse it, and if successful at this, constructs a 
@@ -271,6 +269,7 @@ def parse_file(path, fname, exc_msg_queue, index, output_rec_queue):
 
     :param path: [string] path to file
     :param fname: [string] name of rawacf file
+    :param exc_msg_queue: [mp.Queue] for sending exception messages to
     [:param index:] [int] number of file in directory. Helpful for logging.
 
     :returns: A RawacfRecord constructed using RawacfRecord.record_from_dics
@@ -285,7 +284,7 @@ def parse_file(path, fname, exc_msg_queue, index, output_rec_queue):
             dics = rut.acf_dic(path + '/' + fname)
         else:
             logging.info('\t{0} File {1} not used for dmap records.'.format(index, fname))
-            return
+            return None
 
     except backscatter.dmap.DmapDataError as e:
         err_str = "\t{0} File: {1}: Error reading dmap from stream - possible record" + \
@@ -293,14 +292,15 @@ def parse_file(path, fname, exc_msg_queue, index, output_rec_queue):
         logging.error(err_str.format(index, fname))
         # Tell the write handler to add this to the list of bad rawacf files
         exc_msg_queue.put((fname, e))
-        return
+        return None
+
     except MemoryError as e:
         logging.error("\t{0} File: {1}: RAN OUT OF MEMORY.".format(index, fname))
         exc_msg_queue.put((fname, e))
+        # 'Just do it again!'. I know its inelegant, but this occurs rarely...
         import time
         time.sleep(SHORT_SLEEP_INTERVAL)
-        # TODO: Make this less embarassing (don't just call self again)
-        return parse_file(path, fname, exc_msg_queue, index, output_rec_queue)
+        return parse_file(path, fname, index, exc_msg_queue)
 
     # II. Make rawacf record and check the data's okay     
     try:
@@ -317,14 +317,18 @@ def parse_file(path, fname, exc_msg_queue, index, output_rec_queue):
         exc_msg_queue.put((fname, e))
 
     # III. Output record
-    if output_rec_queue is not None:
-        # If multiprocessing, use an output dictionary
-        dic = {index: r}
-        output_rec_queue.put(dic)
-        return
-    else:
-        # Then just a single file was being parsed
-        return r
+    return r
+
+def parse_file_wrapper(args):
+    """
+    Wrapper for parse_file that takes one argument only (each of which is a
+    tuple of parse_file's arguments).
+    
+    :param args: tuple of the arguments destined for parse_file
+    
+    :returns: the output of parse_file: a [rawacf_utils.RawacfRecord object]
+    """
+    return parse_file(*args)
   
 def exc_handler_func(exc_msg_queue):
     """

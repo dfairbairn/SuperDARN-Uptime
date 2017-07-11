@@ -271,8 +271,41 @@ def acf_dic(fname):
 def globus_connect():
     """
     Function for encapsulating the process of connecting to Globus.
+
+    ** NOTE **
+    Although it's generally expected that folks should use subprocess.call
+    instead of os.system nowadays, I found that only os.system worked for this.
+
+    > subprocess.Popen([str(rut.GLOBUS_STARTUP_LOC), '-start', '&'])
+    > subprocess.Popen([str(rut.GLOBUS_STARTUP_LOC), '-start', '&'], 
+                        stdout=subprocess.PIPE)
+    The above two python lines only produce <defunct> processes that don't 
+    function as globus endpoints
+
+    > subprocess.Popen([str(rut.GLOBUS_STARTUP_LOC), '-start', '&'], 
+                        stdout=subprocess.PIPE, shell=True)
+    The above line returns the help prompt from the globusconnect script (as 
+    if no args were given)
     """
-    _ = subprocess.check_output([GLOBUS_STARTUP_LOC, '-start', '&'])
+    _ = os.system(GLOBUS_STARTUP_LOC + ' -start &')
+    logging.info("Subprocess received message {0}".format(_) + \
+            " from attempting globus startup.")
+
+def globus_disconnect():
+    """
+    Kills the globus connection by searching active processes for the ones
+    that have 'globusonline' in their command name/args.
+    """
+    procs = subprocess.Popen(['ps','-u'], stdout=subprocess.PIPE)
+    grep = subprocess.Popen(['grep', 'globusonline'], 
+                                    stdin=procs.stdout, stdout=subprocess.PIPE)
+    cut = subprocess.check_output(['cut', '-d', ' ', '-f', '3'], stdin=grep.stdout)
+    for pid in cut.split('\n')[:-1]:
+        logging.debug("Preparing to kill PID #{0}...".format(pid))
+        try:
+            out = subprocess.check_output(['kill','-s','SIGKILL',pid])
+        except subprocess.CalledProcessError as e:
+            logging.debug("Error with kill of {0}: {1}".format(pid, e))
 
 def globus_query(script_query):
     """

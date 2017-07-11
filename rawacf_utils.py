@@ -189,8 +189,8 @@ class RawacfRecord(object):
                 cmd_name = cmd
                 cmd_args = ""
             else:
-                cmd_name = cmd.split(' ',1)[0]
-                cmd_args = cmd.split(' ',1)[1]
+                cmd_name = cmd_spl[0]
+                cmd_args = cmd_spl[1]
         except InconsistentRawacfError:
             logging.debug("Inconsistency found in origin command")
             cmd_name = "<UnknownCommand>"
@@ -392,7 +392,8 @@ def get_datestr(dt_obj):
     
     :returns: a [str] of format yyyymmdd
     """
-    return str(dt_obj.year) + two_pad(dt_obj.month) + two_pad(dt_obj.day)
+#    return str(dt_obj.year) + two_pad(dt_obj.month) + two_pad(dt_obj.day)
+    return str(dt_obj.year) + "{:02d}".format(dt_obj.month) + "{:02d}".format(dt_obj.day)
 
 def get_timestr(dt_obj):
     """

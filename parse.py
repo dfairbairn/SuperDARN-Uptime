@@ -27,6 +27,9 @@ import backscatter
 import rawacf_utils as rut
 from rawacf_utils import two_pad
 
+SUBPROC_JOIN_TIMEOUT = 15
+SHORT_SLEEP_INTERVAL = 0.1
+
 BAD_RAWACFS_FILE = './bad_rawacfs.txt'
 BAD_CPIDS_FILE = './bad_cpids.txt'
 LOG_FILE = 'parse.log'
@@ -75,11 +78,11 @@ def process_rawacfs_day(year, month, day, station_code=None, conn=None):
     # II. Fetch the files
     if all_stids:
         script_query = [rut.SYNC_SCRIPT_LOC,'-y', str(year), '-m',
-            str(month), '-p', str(year)+two_pad(month)+two_pad(day)+"*", rut.ENDPOINT]
+            str(month), '-p', str(year)+"{:02d}".format(month)+"{:02d}".format(day)+"*", rut.ENDPOINT]
     else:
         # The case that we're looking at just one particular station
         script_query = [rut.SYNC_SCRIPT_LOC,'-y', str(year), '-m',
-            str(month), '-p', str(year)+two_pad(month)+two_pad(day)+"*"+station_code, 
+            str(month), '-p', str(year)+"{:02d}".format(month)+"{:02d}".format(day)+"*"+station_code, 
             rut.ENDPOINT]
     rut.globus_query(script_query)
 
@@ -87,14 +90,14 @@ def process_rawacfs_day(year, month, day, station_code=None, conn=None):
     # B. Parse the rawacf files, save their metadata in our DB
     parse_rawacf_folder(rut.ENDPOINT, conn=conn)
     logging.info("\t\tDone with parsing {0}-{1}-{2} rawacf data".format(
-                 str(year), two_pad(month), two_pad(day)))
+                 str(year), "{:02d}".format(month), "{:02d}".format(day)))
     conn.commit()
 
     # C. Clear the rawacf files that were fetched in this cycle
     try:
         rut.clear_endpoint()
         logging.info("\t\tDone with clearing {0}-{1}-{2} rawacf data".format(
-                 str(year), two_pad(month), two_pad(day)))
+                 str(year), "{:02d}".format(month), "{:02d}".format(day)))
     except subprocess.CalledProcessError:
         logging.error("\t\tUnable to remove files.")
     logging.info("Completed processing of requested day's rawacf data.")
@@ -120,30 +123,30 @@ def process_rawacfs_month(year, month, conn=sqlite3.connect("superdarntimes.sqli
     logging.info("Beginning to process Rawacf logs... ")
     
     last_day = calendar.monthrange(year, month)[1]
-    logging.info("Starting to analyze {0}-{1} files...".format(str(year), two_pad(month))) 
+    logging.info("Starting to analyze {0}-{1} files...".format(str(year), "{:02d}".format(month))) 
 
     # II. For each day in the month:
     for day in np.arange(1,last_day+1):
 
         logging.info("\tLooking at {0}-{1}-{2}".format(
-                     str(year), two_pad(month), two_pad(day)))
+                     str(year), "{:02d}".format(month), "{:02d}".format(day)))
 
         # A. First, grab the rawacfs via globus (and wait on it)
         script_query = [rut.SYNC_SCRIPT_LOC,'-y', str(year), '-m',
-            str(month), '-p', str(year)+two_pad(month)+two_pad(day)+"*", rut.ENDPOINT]
+            str(month), '-p', str(year)+"{:02d}".format(month)+"{:02d}".format(day)+"*", rut.ENDPOINT]
 
         rut.globus_query(script_query)
 
         # B. Parse the rawacf files, save their metadata in our DB
         parse_rawacf_folder(rut.ENDPOINT, conn=conn)
         logging.info("\t\tDone with parsing {0}-{1}-{2} rawacf data".format(
-                     str(year), two_pad(month), two_pad(day)))
+                     str(year), "{:02d}".format(month), "{:02d}".format(day)))
 
         # C. Clear the rawacf files that were fetched in this cycle
         try:
             rut.clear_endpoint()
             logging.info("\t\tDone with clearing {0}-{1}-{2} rawacf data".format(
-                     str(year), two_pad(month), two_pad(day)))
+                     str(year), "{:02d}".format(month), "{:02d}".format(day)))
         except subprocess.CalledProcessError:
             logging.error("\t\tUnable to remove files.")
 
@@ -188,7 +191,7 @@ def process_file(fname):
     """
     # Start exception handler/write handler
     exc_msg_queue = mp.Queue()
-    write_handler = mp.Process(target=write_handler_func, args=( exc_msg_queue))
+    write_handler = mp.Process(target=exc_handler_func, args=( exc_msg_queue))
     write_handler.start()
     output_rec_queue = mp.Queue() 
     try:
@@ -229,7 +232,7 @@ def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite")):
 
     # Start exception handler/write handler
     exc_msg_queue = mp.Queue()
-    write_handler = mp.Process(target=write_handler_func, args=( exc_msg_queue,))
+    write_handler = mp.Process(target=exc_handler_func, args=( exc_msg_queue,))
     write_handler.start()  
  
     # Start workers 
@@ -241,8 +244,8 @@ def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite")):
    
     # Wait for processes to end 
     for p in processes:
-        p.join()
-    time.sleep(1)
+        p.join(SUBPROC_JOIN_TIMEOUT)
+    time.sleep(SHORT_SLEEP_INTERVAL*5)
     write_handler.terminate() 
 
     # Look through outputted records, saving to the database
@@ -291,6 +294,13 @@ def parse_file(path, fname, exc_msg_queue, index, output_rec_queue):
         # Tell the write handler to add this to the list of bad rawacf files
         exc_msg_queue.put((fname, e))
         return
+    except MemoryError as e:
+        logging.error("\t{0} File: {1}: RAN OUT OF MEMORY.".format(index, fname))
+        exc_msg_queue.put((fname, e))
+        import time
+        time.sleep(SHORT_SLEEP_INTERVAL)
+        # TODO: Make this less embarassing (don't just call self again)
+        return parse_file(path, fname, exc_msg_queue, index, output_rec_queue)
 
     # II. Make rawacf record and check the data's okay     
     try:
@@ -316,7 +326,7 @@ def parse_file(path, fname, exc_msg_queue, index, output_rec_queue):
         # Then just a single file was being parsed
         return r
   
-def write_handler_func(exc_msg_queue):
+def exc_handler_func(exc_msg_queue):
     """
     Function for doing the writing to bad_rawacfs.txt and bad_cpids.txt to 
     avoid race conditions between worker processes.
@@ -327,15 +337,20 @@ def write_handler_func(exc_msg_queue):
     """
     while True:
         if exc_msg_queue.empty():
-            time.sleep(0.1)
+            time.sleep(SHORT_SLEEP_INTERVAL)
         else:
             try:
-                logging.info("Message received!")
+                logging.debug("Write handler received a message!")
                 fname, exc = exc_msg_queue.get()
                 if type(exc) == rut.InconsistentRawacfError:
+                    logging.debug("Write handler saving a bad_cpid event")
                     write_inconsistent_rawacf(fname, exc)
                 elif type(exc) == backscatter.dmap.DmapDataError:
+                    logging.debug("Write handler saving a bad_rawacf event")
                     write_bad_rawacf(fname, exc)
+                elif type(exc) == MemoryError:
+                    logging.debug("Exception handler sees memory error")
+                    # TODO: Find a way to restart the process that has the memory error
             except TypeError:
                 logging.error("Write handler had trouble unpacking message!")
             except IOError:

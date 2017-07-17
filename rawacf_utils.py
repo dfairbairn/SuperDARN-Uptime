@@ -27,11 +27,20 @@ logging.basicConfig(level=logging.DEBUG,
     format='%(levelname)s %(asctime)s: %(message)s', 
     datefmt='%m/%d/%Y %I:%M:%S %p')
 
+CONSISTENT_RAWACF_THRESH = 20
+
 class InconsistentRawacfError(Exception):
     """
     Raised when data from a rawacf file is inconsistent or incorrectly
     formatted, e.g. when a field which should be constant (e.g. origin 
     cmd) is inconsistent throughout a record.
+    """
+
+class BadRawacfError(backscatter.dmap.DmapDataError):
+    """
+    An internal error type associated with a bad Rawacf file.
+    This is currently only associated with finding a rawacf file with only
+    one entry.
     """
 
 class RawacfRecord(object):
@@ -166,24 +175,28 @@ class RawacfRecord(object):
         
         :returns: RawacfRecord constructed from information in the dicts
         """ 
+        import backscatter
         assert(type(dics)==list)
         assert(type(dics[0]==dict))
-        assert(len(dics)>1) 
+        if len(dics) <= 1:
+            logging.error("** Rare circumstance: A single-entry rawacf dmap! ***")
+            err_str = "DMAP record found with only one data point. "
+            raise BadRawacfError(err_str)
         # Parse the <theoretically> constant parameters for the experiment
         try:
-            stid = process_field(dics, 'stid')
+            stid = check_field(dics, 'stid')
         except InconsistentRawacfError as e:
             logging.debug("\tInconsistency found in station ID: {0}".format(e))
             stid = -1
             not_corrupt = False
         try:
-            cpid = process_field(dics, 'cp')
+            cpid = check_field(dics, 'cp')
         except InconsistentRawacfError as e: 
             logging.debug("\tInconsistency found in cpid: {0}".format(e))
             cpid = -1
             not_corrupt = False
         try:
-            cmd = process_field(dics, 'origin.command')
+            cmd = check_field(dics, 'origin.command')
             cmd_spl =  cmd.split(' ',1)
             if len(cmd_spl)==1:
                 cmd_name = cmd
@@ -212,7 +225,7 @@ class RawacfRecord(object):
         # logging.info(diffs)
 
         # Check that every difference between entries is 20 seconds or less
-        times_consistent = int(( np.array(diffs) < 20 ).all())
+        times_consistent = int(( np.array(diffs) < CONSISTENT_RAWACF_THRESH ).all())
 
         if 'not_corrupt' not in locals():
             not_corrupt = True
@@ -373,7 +386,7 @@ def reconstruct_datetime(dic):
            dic['time.mt'], dic['time.sc'], dic['time.us']) 
     return t
 
-def process_field(dics, field):
+def check_field(dics, field):
     """
     Takes a list of dictionaries representing the dmap object for a 
     rawacf file as well as a particular field, and extracts the field 
@@ -387,7 +400,7 @@ def process_field(dics, field):
     val = dics[0][field]
     for i in dics:
         if i[field] != val:
-            dbg_str = "process_field() was seeing record of {0}".format(val)
+            dbg_str = "check_field() was seeing record of {0}".format(val)
             dbg_str += " for '{0}' but now sees {1}".format(field, i[field])
             raise InconsistentRawacfError(dbg_str)
     return val

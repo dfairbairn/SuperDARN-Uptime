@@ -22,6 +22,7 @@ import numpy as np
 import sqlite3
 import argparse
 import time
+import multiprocessing as mp
 
 import backscatter 
 import rawacf_utils as rut
@@ -181,7 +182,7 @@ def test_process_rawacfs(conn=sqlite3.connect("superdarntimes.sqlite")):
     except subprocess.CalledProcessError:
         logging.error("\t\tUnable to remove files")
 
-def process_file(fname):
+def process_file(fname, conn=sqlite3.connect("superdarntimes.sqlite")):
     """
     Essentially a wrapper for using parse_file that handles some possible 
     exceptions. This function is only used if you call the script to just
@@ -192,11 +193,13 @@ def process_file(fname):
     # Start exception handler/write handler
     manager = mp.Manager()
     exc_msg_queue = manager.Queue()
-    write_handler = mp.Process(target=exc_handler_func, args=( exc_msg_queue))
+    write_handler = mp.Process(target=exc_handler_func, args=( exc_msg_queue,))
     write_handler.start()
     try:
         dummy_index = 1
-        r = parse_file(folder, fil, dummy_index, exc_msg_queue)
+        path = os.path.dirname(fname)
+        fil = os.path.basename(fname)
+        r = parse_file(path, fil, dummy_index, exc_msg_queue)
 
     except backscatter.dmap.DmapDataError as e:
         err_str = "\t{0} File: {1}: Error reading dmap from stream - possible record" + \
@@ -207,7 +210,9 @@ def process_file(fname):
     except rut.InconsistentRawacfError as e:
         err_str = "\t{0} File {1}: Exception raised during process_experiment: {2}"
         logging.warning(err_str.format(index, fname, e))
-    r.save_to_db() 
+    write_handler.terminate()
+    curr = conn.cursor()
+    r.save_to_db(curr) 
     return r
 
 def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite")):
@@ -219,7 +224,6 @@ def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite")):
                     rawacf files from
     :param conn: [sqlite3 connection] to the database
     """
-    import multiprocessing as mp
     import itertools
     assert(os.path.isdir(folder))
     cur = conn.cursor()
@@ -242,9 +246,14 @@ def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite")):
     # Set the pool to work
     logging.debug("Beginning a pool multiprocessing of the files...") 
     pool = mp.Pool()
+    #try: 
     recs = pool.map(parse_file_wrapper, arg_bundle)
-    logging.debug("Done with multiprocessing of files (supposedly)")
+    #except AssertionError as e:
+    #    logging.error("AssertionError thrown! These are still a mystery here. ")
+    #    logging.debug("Message from AssertionError is: {0}".format(e))
+    #    logging.error("What this means is that for some reason we can't get a return from pool.map...")
        
+    logging.debug("Done with multiprocessing of files (supposedly)")
     write_handler.terminate() 
 
     num_uncounted = 0
@@ -310,11 +319,14 @@ def parse_file(path, fname, index, exc_msg_queue):
             raise rut.InconsistentRawacfError(err_str)
         logging.info('\t{0} File  {1}: File processed.'.format(index, fname))
 
-    except rut.InconsistentRawacfError as e:
+    except (rut.BadRawacfError, rut.InconsistentRawacfError)  as e:
         err_str = "\t{0} File {1}: Exception raised during process_experiment: {2}"
         logging.warning(err_str.format(index, fname, e))
         # Tell the write handler to add this to the list of files with bad CPIDS 
         exc_msg_queue.put((fname, e))
+        if isinstance(e, rut.BadRawacfError):
+            logging.debug("BadRawacfError found. Foregoing retrieval of record...")
+            return None
 
     # III. Output record
     return r
@@ -346,10 +358,10 @@ def exc_handler_func(exc_msg_queue):
             try:
                 logging.debug("Write handler received a message!")
                 fname, exc = exc_msg_queue.get()
-                if type(exc) == rut.InconsistentRawacfError:
+                if isinstance(exc, rut.InconsistentRawacfError):
                     logging.debug("Write handler saving a bad_cpid event")
                     write_inconsistent_rawacf(fname, exc)
-                elif type(exc) == backscatter.dmap.DmapDataError:
+                elif isinstance(exc, backscatter.dmap.DmapDataError) or isinstance(exc, rut.BadRawacfError):
                     logging.debug("Write handler saving a bad_rawacf event")
                     write_bad_rawacf(fname, exc)
                 elif type(exc) == MemoryError:
@@ -365,7 +377,7 @@ def write_inconsistent_rawacf(fname, exc):
     Performs the actual writing to the bad_cpids.txt file.
 
     :param fname: [str] filename that had inconsistent fields in it
-    :param exc: [rawacf_utils.InconsistentRawacfError] exception object
+    :param exc: [rawacf_utils.BadRawacfError] exception object
     """
     # ***ADD TO LIST OF BAD_CPIDS ***
     with open(BAD_CPIDS_FILE, 'a') as f:

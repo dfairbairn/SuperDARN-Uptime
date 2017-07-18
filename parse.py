@@ -379,6 +379,8 @@ def exc_handler_func(exc_msg_queue):
                 elif type(exc) == MemoryError:
                     logging.debug("Exception handler sees memory error")
                     # TODO: Find a way to restart the process that has the memory error
+                else:
+                    logging.debug("Handled miscellaneous other exception")
             except TypeError:
                 logging.error("Write handler had trouble unpacking message!")
             except IOError:

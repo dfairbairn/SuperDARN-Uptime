@@ -595,6 +595,7 @@ def process_experiment(dics, conn):
     """
     cur = conn.cursor()
     r = RawacfRecord.record_from_dics(dics)
+    r.save_to_db()
     return r
 
 def select_exps(sql_select, cur):

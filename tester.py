@@ -29,7 +29,7 @@ TESTS_DIR = UPTIME_ROOT_DIR + '/tests'
 TEST_BZFILE1 = 'tests/sample_files/20161201.0401.00.bks.rawacf.bz2'
 TEST_BZFILE2 = 'tests/sample_files/20161201.1441.54.han.rawacf.bz2'
 TEST_RAWACF = 'tests/sample_files/20170601.0001.00.sas.rawacf'
-
+TESTDB = "testdb.sqlite"
 
 test_dmap_dicts = [{'cp': 3, 'origin.command': 'test', 'stid': 5, 'txpl': 300,
                     'rsep': 45, 'bmnum': 0},
@@ -221,7 +221,7 @@ def test_db():
     """
     logging.info("Testing the database functions...")
     # Try connecting to a database and enforcing its structure?
-    mydb = "testdb.sqlite"
+    mydb = TESTDB
     conn = rut.connect_db(dbname=mydb)
     cur = conn.cursor()
     if not os.path.isfile(mydb) or not rut.check_db(cur):
@@ -284,11 +284,44 @@ def test_check_fields():
 
 def test_records():
     """
+    Tests the creation of RawacfRecord objects and their use.
 
+    Full coverage would require special object cases etc., but for here
+    I'm just double-checking that the basic case-handling works.
     """
-    # First and foremost, testing record_from_dics    
+    # Testing record_from_dics()  
     dmap_dicts = rut.acf_dic(TEST_RAWACF) 
     r = rut.RawacfRecord.record_from_dics(dmap_dicts)
+    logging.debug("Test record built from dmap dictionaries:\n{0}".format(r))
+    if type(r) != rut.RawacfRecord:
+        logging.error("Problem with record_from_dicts")
+ 
+    # Testing save_to_db()
+    conn = rut.connect_db(TESTDB)
+    cur = conn.cursor()
+    r.save_to_db(cur)
+
+    # Testing select_exps (again)
+    # recs = rut.select_exps('select * from exps', cur)
+    
+    # Testing record_from_tuple()
+    cur.execute('select * from exps')
+    recs = cur.fetchall()
+    tup = recs[0]
+    if type(tup) != tuple:
+        err_str = "Unexpected result in attempting to test record_from_tuple."
+        err_str += " Possible problem with save_to_db()"
+        logging.error(err_str)
+    r2 = rut.RawacfRecord.record_from_tuple(tup)
+    logging.debug("Test record after saving to DB and reconstructing:\n{0}".format(r2))
+    if type(r2) != rut.RawacfRecord:
+        logging.error("Problem with record_from_tuple")
+    
+    # Testing duration()
+    dur = r.duration()
+    logging.debug("Duration of test record: {0}".format(dur))
+    if type(dur) != float:
+        logging.error("Error with duration()")
 
 if __name__=="__main__":
     rut.read_config()
@@ -300,11 +333,13 @@ if __name__=="__main__":
     conn = rut.connect_db()
     cur = conn.cursor()
    
-    parse.initialize_logger(True)
+    parse.initialize_logger(quiet_mode=False)#True)
     test_reads()
     test_check_fields() 
     test_db()
-    test_reads()
+    test_records() # Requires reads(), fields(), db() to have been tested before.
+
     test_exc_handler()
     test_err_writers()
+
     #test_process_rawacfs()

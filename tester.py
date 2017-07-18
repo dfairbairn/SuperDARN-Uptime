@@ -14,11 +14,13 @@ author: David Fairbairn
 import subprocess
 import os
 
+import time
 import rawacf_utils as rut
 import parse
 import uptime
 import sqlite3
 import multiprocessing as mp
+import logging
 
 UPTIME_ROOT_DIR = '.'
 TESTS_DIR = UPTIME_ROOT_DIR + '/tests'
@@ -35,6 +37,9 @@ test_dmap_dicts = [{'cp': 3, 'origin.command': 'test', 'stid': 5, 'txpl': 300,
                     'rsep': 45, 'bmnum': 0},
                     {'cp': 3, 'origin.command': 'test', 'stid': 5, 'txpl': 300,
                     'rsep': 45, 'bmnum': 0}]
+
+sample_start_iso = "2017-07-18T15:00:37.245704" 
+sample_end_iso = "2017-07-18T15:30:00"
 
 # ------------------------------------------------------------------------------
 #                       Parse.py Tests: High-Level Methods
@@ -118,22 +123,21 @@ def test_err_writers():
 
     [critical test]
     """
+    logging.info("Testing correct record-keeping of erroneous files...")
     ex1 = rut.BadRawacfError('Test Bad Exception')
     ex2 = rut.InconsistentRawacfError('Test Inconsistent Exception')
     fname = 'testfile'
-    cpids_f, rawacfs_f = parse.BAD_CPIDS_FILE, parse.BAD_RAWACFS_FILE
-    parse.BAD_CPIDS_FILE, parse.BAD_RAWACFS_FILE = 'test_bad_files.txt', 'test_bad_files.txt'
-    write_bad_rawacf(fname, ex1)
-    write_inconsistent_rawacf(fname, ex2)
-    with open(fname, 'r') as f:
+    test_listfile = 'test_bad_files.txt'
+    parse.write_bad_rawacf(fname, ex1, bad_files_log=test_listfile)
+    parse.write_inconsistent_rawacf(fname, ex2, inconsistents_log=test_listfile)
+    with open(test_listfile, 'r') as f:
         file_contents = f.read()
-        test_str = "testfile: Test Inconsistent Exception\ntestfile: Test Bad Exception"    
+        test_str = "testfile:\"Test Bad Exception\"\ntestfile:Test Inconsistent Exception\n"    
         if file_contents != test_str:
-            logging.info("test_err_writers() failed!")
-            parse.BAD_CPIDS_FILE, parse.BAD_RAWACFS_FILE = cpids_f, rawacfs_f
-            return 1 
-    parse.BAD_CPIDS_FILE, parse.BAD_RAWACFS_FILE = cpids_f, rawacfs_f
-    return 0
+            print file_contents
+            print test_str
+            logging.error("test_err_writers() failed!")
+    os.remove(test_listfile)
 
 def test_init_log():
     """
@@ -151,18 +155,17 @@ def test_exc_handler():
     Tests whether multiprocessing can be used to spawn an exception handler
     process.
     """
+    logging.info("Testing the exception handler from parse.py...")
     manager = mp.Manager()
     exc_msg_queue = manager.Queue()
-    p = mp.Process(target=exc_handler_func, args=( exc_msg_queue,))
+    p = mp.Process(target=parse.exc_handler_func, args=( exc_msg_queue,))
     p.start()
-    exc_msg_queue.put(Exception("Test"))
+    exc_msg_queue.put(('testfile',Exception("Test")))
     # Check that the the exception was processed by the handler
     time.sleep(parse.SHORT_SLEEP_INTERVAL)
     if not exc_msg_queue.empty():
         logging.error("Exception handler seems to be not doing its job!")
-        return 1
-    else:
-        return 0
+    p.terminate()
 
 # ------------------------------------------------------------------------------
 #                   rawacf_utils.py Tests: Database methods
@@ -172,40 +175,74 @@ def test_reads():
     """
     Check that functions that use the backscatter DMAP reads are successful.
     """
-    if bz2_dic(TEST_RAWACF) is not None:
-        logging.error("Erroneous bz2_dic() result!")
-    if acf_dic(TEST_BZFILE1) is not None:
-        logging.error("Erroneous acf_dic() result!")
-    # Should read successfully
-    dics = rut.bz2_dic(TEST_BZFILE)
+    logging.info("Testing acquisition of dmap lists from bz2/rawacf files")
+    # Running bz2_dic and acf_dic on the wrong files should throw exceptions
+    try:
+        dics = rut.bz2_dic(TEST_RAWACF)
+        logging.error("Erroneous bz2_dic() result! 1")
+    except IOError: 
+        pass
+
+    try:
+        dics = rut.acf_dic(TEST_BZFILE1)
+        logging.error("Erroneous acf_dic() result! 2")
+    except IOError:
+        pass
+
+    # Next tests should read successfully
+    dics = rut.bz2_dic(TEST_BZFILE1)
     if type(dics) != list and type(dics[0]) is not dict:
-        logging.error("Erroneous bz2_dic() result!")
+        logging.error("Erroneous bz2_dic() result! 3")
+
     dics2 = rut.acf_dic(TEST_RAWACF) 
     if type(dics2) != list and type(dics2[0]) is not dict:
-        logging.error("Erroneous acf_dic() result!")
-    try:
-        dics3 = rut.bz2_dic(TEST_BZFILE)
-    except rut.InconsistentRawacfError:
-        # working as intended that this happens
-        pass
+        logging.error("Erroneous acf_dic() result! 4")
         
 def test_globus():
     """
     Test for checking that globus functions can work
     """
+    logging.info("Testing connecting, fetching, and disconnecting with globus...")
     rut.globus_connect()
+
     # Try a globus query
+    script_query = [rut.SYNC_SCRIPT_LOC,'-y', '2017', '-m',
+        '02', '-p', '20161202.08*zho', rut.ENDPOINT]
+    rut.globus_query(script_query)
+    if not os.path.isfile(rut.ENDPOINT + '/' + '20161202.0801.00.zho.rawacf.bz2'):
+        logging.error("Problem with a globus fetch using globus_query")
+
     # Try a globus disconnect?
-    pass
     rut.globus_disconnect()
 
 def test_db():
+    """
+    Database tests with a separate custom database.
+    """
+    logging.info("Testing the database functions...")
+    # Try connecting to a database and enforcing its structure?
     mydb = "testdb.sqlite"
     conn = rut.connect_db(dbname=mydb)
     cur = conn.cursor()
-    # Try connecting to a database and enforcing its structure?
+    if not os.path.isfile(mydb) or not rut.check_db(cur):
+        logging.error("Problem with connecting to or creating DB!")
+
     # Try saving to it?
+    cur.execute('INSERT INTO exps (stid, start_iso, end_iso) VALUES (?, ?, ?)',
+                (3, sample_start_iso, sample_end_iso))
+    conn.commit()
+
+    # Try accessing it? 
+    test_sql = 'select * from exps'
+    r = rut.select_exps(test_sql, cur)
+    if len(r) != 1 and not isinstance(rut.RawacfRecord, r):
+        logging.error("Problem with database insert/retrieval!")
+
     # Try closing/disconnecting/clearing?
+    rut.dump_db(conn)
+    r = rut.select_exps(test_sql, cur)
+    if r != []:
+        logging.error("Problem with dumping database!")   
 
 # ------------------------------------------------------------------------------
 #                   rawacf_utils.py Tests: Utility Methods
@@ -216,12 +253,35 @@ def test_check_fields():
     Tests whether a list of dmap dictionaries is properly checked by the
     check_fields() function.
     """
-    rut.check_fields(test_dmap_dicts) 
-    test_dmap_dicts[0]['cp'] = 1
-    rut.check_fields(test_dmap_dicts)
+    logging.info("Testing the field-checking for dmap entries...")
+    objection_dict = rut.check_fields(test_dmap_dicts) 
+    test1 = objection_dict.keys() == []
 
+    # Needs to be able to deal with a non-splittable command name without breaking 
     test_dmap_dicts[0]['origin.command'] = "test"
-    
+    objection_dict = rut.check_fields(test_dmap_dicts) 
+    test2 = objection_dict.keys() == []
+
+    # Needs to detect cpid inconsistency
+    tmp = test_dmap_dicts[0]['cp']
+    test_dmap_dicts[0]['cp'] = 1
+    objection_dict = rut.check_fields(test_dmap_dicts)
+    test3 = 'cp' in objection_dict.keys()
+    test_dmap_dicts[0]['cp'] = tmp
+
+    # Needs to detect unreasonable beam values
+    test_dmap_dicts[0]['bmnum'] = 27
+    objection_dict = rut.check_fields(test_dmap_dicts)
+    test4 = 'bmnum' in objection_dict.keys()
+   
+    # Needs to detect incorrect relationship between rsep and txpl
+    test_dmap_dicts[0]['rsep'] = 50
+    test_dmap_dicts[0]['txpl'] = 250
+    objection_dict = rut.check_fields(test_dmap_dicts)
+    test5 = 'rsep' in objection_dict.keys()
+    if not(test1 and test2 and test3 and test4 and test5):
+        logging.error("Problem wth check_fields()!")
+
 def test_records():
     """
 
@@ -239,4 +299,12 @@ if __name__=="__main__":
     rut.ENDPOINT =  "{0}/endpt".format(UPTIME_ROOT_DIR)
     conn = rut.connect_db()
     cur = conn.cursor()
-    
+   
+    parse.initialize_logger(True)
+    test_reads()
+    test_check_fields() 
+    test_db()
+    test_reads()
+    test_exc_handler()
+    test_err_writers()
+    #test_process_rawacfs()

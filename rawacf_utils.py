@@ -91,8 +91,8 @@ class RawacfRecord(object):
         - [Class method]: record_from_dics(): build a RawacfRecord from a 
                 list of dict (dmap records) originating from a .rawacf file
     """
-    def __init__(self, stid, start_dt, end_dt, cpid,
-                 cmd_name, cmd_args, nave_pos, times_consistent, not_corrupt=True):
+    def __init__(self, stid, start_dt, end_dt, cmd_name="", cmd_args="", cpid=0,
+                 nave_pos=True, times_consistent=True, not_corrupt=True):
         """
         Self-explanatory constructor method.
         """
@@ -139,10 +139,10 @@ class RawacfRecord(object):
         end_time = (self.end_dt).isoformat()
         try:
             cur.execute('''INSERT INTO exps (stid, start_iso, end_iso, 
-            cpid, cmd_name, cmd_args, nave_pos, times_consistent) 
+            cmd_name, cmd_args, cpid, nave_pos, times_consistent) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
             (self.stid, start_time, end_time, 
-            self.cpid, self.cmd_name, self.cmd_args, 
+            self.cmd_name, self.cmd_args, self.cpid,
             int(self.nave_pos), int(self.times_consistent)))
         except sqlite3.IntegrityError:
             logging.error("Unique constraint failed or something.")     
@@ -165,13 +165,14 @@ class RawacfRecord(object):
         """
         assert(len(tup) == 8)
         assert(tup[0] != None and tup[1] != None and tup[2] != None)
-        stid, start_iso, end_iso, cpid = (tup[:4])
-        cmd_name, cmd_args, nave_pos, times_consistent = (tup[-4:])
+        stid, start_iso, end_iso = (tup[:3])
+        cmd_name, cmd_args, cpid = (tup[3:6])
+        nave_pos, times_consistent = (tup[-2:])
         start_dt = iso_to_dt(start_iso)
         end_dt = iso_to_dt(end_iso)
         # Use contents of tuple as arguments for RawacfRecord constructor
-        return cls(stid, start_dt, end_dt, cpid, cmd_name, cmd_args, 
-                nave_pos, times_consistent)
+        return cls(stid, start_dt, end_dt, cmd_name=cmd_name, cmd_args=cmd_args,
+                cpid=cpid, nave_pos=nave_pos, times_consistent=times_consistent)
 
     # Class method for making a RawacfRecord from a dicts from a .rawacf file
     @classmethod
@@ -185,7 +186,6 @@ class RawacfRecord(object):
         
         :returns: RawacfRecord constructed from information in the dicts
         """ 
-        import backscatter
         assert(type(dmap_dicts)==list)
         assert(type(dmap_dicts[0]==dict))
         if len(dmap_dicts) <= 1:
@@ -211,7 +211,6 @@ class RawacfRecord(object):
         start_dt = reconstruct_datetime(dmap_dicts[0])
         end_dt = reconstruct_datetime(dmap_dicts[-1])
                
- 
         # Check for unusual N_ave values
         nave_pos = int(has_positive_nave(dmap_dicts))
     
@@ -227,8 +226,9 @@ class RawacfRecord(object):
 
         if 'not_corrupt' not in locals():
             not_corrupt = True
-        return cls(stid, start_dt, end_dt, cpid, cmd_name, cmd_args, nave_pos, 
-                   times_consistent, not_corrupt)
+        return cls(stid, start_dt, end_dt, cmd_name=cmd_name, cmd_args=cmd_args,
+                    cpid=cpid, nave_pos=nave_pos, times_consistent=times_consistent, 
+                    not_corrupt=not_corrupt)
 
 # -----------------------------------------------------------------------------
 #                               Utility Methods 
@@ -248,11 +248,9 @@ def bz2_dic(fname):
     """
     import bz2
     if not os.path.isfile(fname):
-        logging.error('Not a file!')
-        return None
+        raise IOError('Not a file!')
     if fname[-4:] != '.bz2':
-        logging.error('Not a .bz2 file!')
-        return None
+        raise IOError('Not a .bz2 file!')
     f = bz2.BZ2File(fname,'rb')
     stream = f.read()
     dics = backscatter.dmap.parse_dmap_format_from_stream(stream)
@@ -269,11 +267,9 @@ def acf_dic(fname):
                 the .rawacf file
     """
     if not os.path.isfile(fname):
-        logging.error('Not a file!')
-        return None
+        raise IOError('Not a file!')
     if fname[-7:] != '.rawacf':
-        logging.error('Not a .rawacf file!')
-        return None
+        raise IOError('Not a .rawacf file!')
     f = open(fname,'rb')
     stream = f.read()
     dics = backscatter.dmap.parse_dmap_format_from_stream(stream)
@@ -416,7 +412,6 @@ def check_fields(dmap_dicts):
         if dmap_dict['bmnum'] not in range(range_max):
             dbg_str = "Saw unexpected value of 'bmnum'"
             objection_dict['bmnum'] = dbg_str
-    print objection_dict
     return objection_dict
 
 def has_positive_nave(dics):
@@ -562,25 +557,34 @@ def connect_db(dbname="superdarntimes.sqlite"):
     stid integer NOT NULL,
     start_iso text NOT NULL,
     end_iso text NOT NULL,
-    cpid integer NOT NULL,
-    cmd_name text NOT NULL,
+    cmd_name text,
     cmd_args text,
+    cpid integer,
     nave_pos BOOLEAN,
     times_consistent BOOLEAN,
     PRIMARY KEY (stid, start_iso)
     );
     """) 
-    # And if it *did* exist, make sure it has all the necessary fields:
-    cur.execute('PRAGMA table_info (exps)')
-    flds = ['stid', 'start_iso', 'end_iso', 'cpid', 'cmd_name', 'cmd_args', 
-            'nave_pos', 'times_consistent']
-    tbl_flds = [ en[1] for en in cur.fetchall() ]
-    for f in flds:
-        if f not in tbl_flds:
-            logging.error("Database incorrectly configured.")
-            return None
+    db_correct = check_db(cur)
+    if not db_correct:
+        logging.error("Database incorrectly configured.")
     return conn
 
+def check_db(cur):
+    """
+    Given a cursor to a DB, checks that it has the right structuring.
+    """
+    # And if it *did* exist, make sure it has all the necessary fields:
+    cur.execute('PRAGMA table_info (exps)')
+    flds = ['stid', 'start_iso', 'end_iso', 'cmd_name', 'cmd_args', 'cpid', 
+            'nave_pos', 'times_consistent']
+    tbl_flds = [ en[1] for en in cur.fetchall() ]
+    db_correct = True
+    for f in flds:
+        if f not in tbl_flds:
+            db_correct = False
+    return db_correct
+    
 def clear_db(cur):
     """
     Clears all experiment information in the sqlite3 database.
@@ -592,9 +596,9 @@ def clear_db(cur):
     stid integer NOT NULL,
     start_iso text NOT NULL,
     end_iso text NOT NULL,
-    cpid integer NOT NULL,
-    cmd_name text NOT NULL,
+    cmd_name text,
     cmd_args text,
+    cpid integer,
     nave_pos BOOLEAN,
     times_consistent BOOLEAN,
     PRIMARY KEY (stid, start_iso)
@@ -617,7 +621,7 @@ def select_exps(sql_select, cur):
     Takes an sql query to select certain experiments, returns the list
     of RawacfRecord objects
     """
-    logging.info("Querying with the following string:\n{0}".format(sql_select))
+    logging.debug("Querying with the following string:\n{0}".format(sql_select))
     cur.execute(sql_select)
     entries = cur.fetchall()
     records = []
@@ -627,12 +631,13 @@ def select_exps(sql_select, cur):
         records.append(RawacfRecord.record_from_tuple(entry))
     return records
 
-def dump_db(cur):
+def dump_db(conn):
     """
     Shows all the entries in the DB
     """
-    cur.execute('''select * from exps''')
-    print cur.fetchall()
+    cur = conn.cursor()
+    cur.execute('delete from exps')
+    conn.commit()
 
 if __name__ == "__main__":
     read_config()         

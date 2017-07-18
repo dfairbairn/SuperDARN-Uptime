@@ -380,13 +380,14 @@ def exc_handler_func(exc_msg_queue):
                     logging.debug("Exception handler sees memory error")
                     # TODO: Find a way to restart the process that has the memory error
                 else:
-                    logging.debug("Handled miscellaneous other exception")
+                    err_str = "Handled miscellaneous 'other' exception: {0}"
+                    logging.debug(err_str.format(exc))
             except TypeError:
                 logging.error("Write handler had trouble unpacking message!")
             except IOError:
                 logging.error("Write handler had trouble writing!")
 
-def write_inconsistent_rawacf(fname, exc):
+def write_inconsistent_rawacf(fname, exc, inconsistents_log=BAD_CPIDS_FILE):
     """
     Performs the actual writing to the bad_cpids.txt file.
 
@@ -394,10 +395,10 @@ def write_inconsistent_rawacf(fname, exc):
     :param exc: [rawacf_utils.BadRawacfError] exception object
     """
     # ***ADD TO LIST OF BAD_CPIDS ***
-    with open(BAD_CPIDS_FILE, 'a') as f:
+    with open(inconsistents_log, 'a') as f:
         f.write(fname + ':' + str(exc) + '\n')
 
-def write_bad_rawacf(fname, exc): 
+def write_bad_rawacf(fname, exc, bad_files_log=BAD_RAWACFS_FILE): 
     """
     Performs the actual writing to the bad_rawacfs.txt file.
 
@@ -406,7 +407,7 @@ def write_bad_rawacf(fname, exc):
    
     """
     # ***ADD TO LIST OF BAD_RAWACFS ***
-    with open(BAD_RAWACFS_FILE, 'a') as f:
+    with open(bad_files_log, 'a') as f:
         # Backscatter exceptions have a newline that looks bad in 
         # logs, so I remove them here
         exc_tmp = str(exc).split('\n')
@@ -484,14 +485,14 @@ def process_args(year, month, day, st_code, directory, fname):
     else:
         logging.info("Some form of argument is kinda required!")
 
-def initialize_logger(quiet_mode):
+def initialize_logger(quiet_mode=False):
     """
     Function for setting up the initial logging parameters
 
     :param use_verbose: [boolean] flag indicating whether to be verbose.
         ** If _not_ running parse/fetch requests from the command-line **
     """
-    level = logging.WARNING if quiet_mode else logging.DEBUG
+    level = logging.INFO if quiet_mode else logging.DEBUG
 
     logging.basicConfig(level=level,
         format='%(levelname)s %(asctime)s: %(message)s', 

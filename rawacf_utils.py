@@ -28,6 +28,16 @@ logging.basicConfig(level=logging.DEBUG,
     datefmt='%m/%d/%Y %I:%M:%S %p')
 
 CONSISTENT_RAWACF_THRESH = 20
+radars16 = {'cly': 66, 'gbr': 1, 'han': 10, 'hok': 40, 'hkw': 41, 'inv': 64,
+            'kap': 3, 'ksr': 16, 'kod': 7, 'lyr': 90, 'pyk': 9, 'pgr': 6, 
+            'rkn': 65, 'sas': 5, 'sch': 2, 'sto': 8, 'dce': 96, 'fir': 21,
+            'hal': 4, 'ker': 15, 'mcm': 20, 'san': 11, 'sps': 22, 'sye': 13,
+            'sys': 12, 'tig': 14, 'unw': 18, 'zho': 19}
+radars22 = {'ade': 209, 'adw': 208, 'fhe': 205, 'fhw': 204, 'bpk': 24}
+radars24 = {'bks': 33, 'cve': 207, 'cvw': 206, 'wal': 32}
+allradars = radars16.copy()
+allradars.update(radars22)
+allradars.update(radars24)
 
 class InconsistentRawacfError(Exception):
     """
@@ -165,61 +175,49 @@ class RawacfRecord(object):
 
     # Class method for making a RawacfRecord from a dicts from a .rawacf file
     @classmethod
-    def record_from_dics(cls, dics):
+    def record_from_dics(cls, dmap_dicts):
         """
         Creates and returns a RawacfRecord object constructed from the 
         contents of a list of dictionaries that originates from parsing
         a **RAWACF FILE***
 
-        :param dics: list of dicts from parsing a Rawacf into dmaps
+        :param dmap_dicts: list of dicts from parsing a Rawacf into dmaps
         
         :returns: RawacfRecord constructed from information in the dicts
         """ 
         import backscatter
-        assert(type(dics)==list)
-        assert(type(dics[0]==dict))
-        if len(dics) <= 1:
+        assert(type(dmap_dicts)==list)
+        assert(type(dmap_dicts[0]==dict))
+        if len(dmap_dicts) <= 1:
             logging.error("** Rare circumstance: A single-entry rawacf dmap! ***")
             err_str = "DMAP record found with only one data point. "
             raise BadRawacfError(err_str)
-        # Parse the <theoretically> constant parameters for the experiment
-        try:
-            stid = check_field(dics, 'stid')
-        except InconsistentRawacfError as e:
-            logging.debug("\tInconsistency found in station ID: {0}".format(e))
-            stid = -1
-            not_corrupt = False
-        try:
-            cpid = check_field(dics, 'cp')
-        except InconsistentRawacfError as e: 
-            logging.debug("\tInconsistency found in cpid: {0}".format(e))
-            cpid = -1
-            not_corrupt = False
-        try:
-            cmd = check_field(dics, 'origin.command')
-            cmd_spl =  cmd.split(' ',1)
-            if len(cmd_spl)==1:
-                cmd_name = cmd
-                cmd_args = ""
-            else:
-                cmd_name = cmd_spl[0]
-                cmd_args = cmd_spl[1]
-        except InconsistentRawacfError:
-            logging.debug("Inconsistency found in origin command")
-            cmd_name = "<UnknownCommand>"
+
+        objection_dict = check_fields(dmap_dicts)
+        cpid = dmap_dicts[0]['cp'] if 'cp' not in objection_dict else -1
+        stid = dmap_dicts[0]['stid'] if 'stid' not in objection_dict else -1
+        cmd  = dmap_dicts[0]['origin.command'] if 'origin.command' not in objection_dict else -1
+        cmd_spl =  cmd.split(' ',1)
+        if len(cmd_spl)==1:
+            cmd_name = cmd
             cmd_args = ""
-            not_corrupt = False
+        else:
+            cmd_name = cmd_spl[0]
+            cmd_args = cmd_spl[1]
+        for err_str in objection_dict.values():
+            logging.debug(err_str)
  
         # Parse the start/end temporal fields 
-        start_dt = reconstruct_datetime(dics[0])
-        end_dt = reconstruct_datetime(dics[-1])
-        
+        start_dt = reconstruct_datetime(dmap_dicts[0])
+        end_dt = reconstruct_datetime(dmap_dicts[-1])
+               
+ 
         # Check for unusual N_ave values
-        nave_pos = int(has_positive_nave(dics))
+        nave_pos = int(has_positive_nave(dmap_dicts))
     
         # Check for downtime during the experiment's run
         ts = []
-        for d in dics:
+        for d in dmap_dicts:
             ts.append(reconstruct_datetime(d))
         diffs = [(ts[i+1] - ts[i]).total_seconds() for i in range( len(ts) - 1 )]
         # logging.info(diffs)
@@ -386,7 +384,7 @@ def reconstruct_datetime(dic):
            dic['time.mt'], dic['time.sc'], dic['time.us']) 
     return t
 
-def check_field(dics, field):
+def check_fields(dmap_dicts):
     """
     Takes a list of dictionaries representing the dmap object for a 
     rawacf file as well as a particular field, and extracts the field 
@@ -397,13 +395,29 @@ def check_field(dics, field):
     
     :returns: [abstract] the value that's been requested if it's consistent    
     """
-    val = dics[0][field]
-    for i in dics:
-        if i[field] != val:
-            dbg_str = "check_field() was seeing record of {0}".format(val)
-            dbg_str += " for '{0}' but now sees {1}".format(field, i[field])
-            raise InconsistentRawacfError(dbg_str)
-    return val
+    objection_dict = dict()
+    for i, dmap_dict in enumerate(dmap_dicts):
+        # Check if some fields are consistent throughout
+        for field in ['cp', 'origin.command', 'stid']: 
+            val = dmap_dict[field]
+            first_val = dmap_dicts[0][field]
+            if first_val != val:
+                # Current value of field is different from first value
+                dbg_str = "check_field() was seeing record of {0} for ".format(first_val)
+                dbg_str += "'{0}' but now sees {1} at index {2} of {3}".format(field, val, i, len(dmap_dicts))
+                objection_dict[field] = dbg_str
+                #raise InconsistentRawacfError(dbg_str)
+        # Check if rsep corresponds to txpl
+        if (dmap_dict['txpl']*3/20) != dmap_dict['rsep']:
+            dbg_str = "Fields 'rsep' and 'txpl' are inconsistent with each other."
+            objection_dict['rsep'] = objection_dict['txpl'] = dbg_str
+        # Check if bmnum is valid ?
+        range_max = 16 if dmap_dict['stid'] in radars16.values() else 24
+        if dmap_dict['bmnum'] not in range(range_max):
+            dbg_str = "Saw unexpected value of 'bmnum'"
+            objection_dict['bmnum'] = dbg_str
+    print objection_dict
+    return objection_dict
 
 def has_positive_nave(dics):
     """

@@ -24,6 +24,18 @@ UPTIME_ROOT_DIR = '.'
 TESTS_DIR = UPTIME_ROOT_DIR + '/tests'
 #UPTIME_ROOT_DIR='..'
 
+TEST_BZFILE1 = 'tests/sample_files/20161201.0401.00.bks.rawacf.bz2'
+TEST_BZFILE2 = 'tests/sample_files/20161201.1441.54.han.rawacf.bz2'
+TEST_RAWACF = 'tests/sample_files/20170601.0001.00.sas.rawacf'
+
+
+test_dmap_dicts = [{'cp': 3, 'origin.command': 'test', 'stid': 5, 'txpl': 300,
+                    'rsep': 45, 'bmnum': 0},
+                    {'cp': 3, 'origin.command': 'test', 'stid': 5, 'txpl': 300,
+                    'rsep': 45, 'bmnum': 0},
+                    {'cp': 3, 'origin.command': 'test', 'stid': 5, 'txpl': 300,
+                    'rsep': 45, 'bmnum': 0}]
+
 # ------------------------------------------------------------------------------
 #                       Parse.py Tests: High-Level Methods
 # ------------------------------------------------------------------------------
@@ -152,12 +164,6 @@ def test_exc_handler():
     else:
         return 0
 
-"""
-def test_args():
-    # Actually, this would be kind of pointless/difficult
-    return 1
-"""
-
 # ------------------------------------------------------------------------------
 #                   rawacf_utils.py Tests: Database methods
 # ------------------------------------------------------------------------------
@@ -166,10 +172,6 @@ def test_reads():
     """
     Check that functions that use the backscatter DMAP reads are successful.
     """
-    TEST_BZFILE1 = 'tests/sample_files/20161201.0401.00.bks.rawacf.bz2'
-    TEST_BZFILE2 = 'tests/sample_files/20161201.1441.54.han.rawacf.bz2'
-    TEST_RAWACF = 'tests/sample_files/20170601.0001.00.sas.rawacf'
-
     if bz2_dic(TEST_RAWACF) is not None:
         logging.error("Erroneous bz2_dic() result!")
     if acf_dic(TEST_BZFILE1) is not None:
@@ -177,29 +179,56 @@ def test_reads():
     # Should read successfully
     dics = rut.bz2_dic(TEST_BZFILE)
     if type(dics) != list and type(dics[0]) is not dict:
-        logging.error("Erroneou bz2_dic() result!")
+        logging.error("Erroneous bz2_dic() result!")
     dics2 = rut.acf_dic(TEST_RAWACF) 
     if type(dics2) != list and type(dics2[0]) is not dict:
-        logging.error("Erroneou acf_dic() result!")
+        logging.error("Erroneous acf_dic() result!")
     try:
         dics3 = rut.bz2_dic(TEST_BZFILE)
     except rut.InconsistentRawacfError:
         # working as intended that this happens
+        pass
         
 def test_globus():
     """
     Test for checking that globus functions can work
     """
     rut.globus_connect()
-
-
+    # Try a globus query
+    # Try a globus disconnect?
+    pass
+    rut.globus_disconnect()
 
 def test_db():
     mydb = "testdb.sqlite"
     conn = rut.connect_db(dbname=mydb)
     cur = conn.cursor()
+    # Try connecting to a database and enforcing its structure?
+    # Try saving to it?
+    # Try closing/disconnecting/clearing?
 
+# ------------------------------------------------------------------------------
+#                   rawacf_utils.py Tests: Utility Methods
+# ------------------------------------------------------------------------------
 
+def test_check_fields():
+    """
+    Tests whether a list of dmap dictionaries is properly checked by the
+    check_fields() function.
+    """
+    rut.check_fields(test_dmap_dicts) 
+    test_dmap_dicts[0]['cp'] = 1
+    rut.check_fields(test_dmap_dicts)
+
+    test_dmap_dicts[0]['origin.command'] = "test"
+    
+def test_records():
+    """
+
+    """
+    # First and foremost, testing record_from_dics    
+    dmap_dicts = rut.acf_dic(TEST_RAWACF) 
+    r = rut.RawacfRecord.record_from_dics(dmap_dicts)
 
 if __name__=="__main__":
     rut.read_config()

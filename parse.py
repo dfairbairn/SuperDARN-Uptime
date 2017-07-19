@@ -259,12 +259,7 @@ def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite")):
     # Set the pool to work
     logging.debug("Beginning a pool multiprocessing of the files...") 
     pool = mp.Pool()
-    #try: 
     recs = pool.map(parse_file_wrapper, arg_bundle)
-    #except AssertionError as e:
-    #    logging.error("AssertionError thrown! These are still a mystery here. ")
-    #    logging.debug("Message from AssertionError is: {0}".format(e))
-    #    logging.error("What this means is that for some reason we can't get a return from pool.map...")
        
     logging.debug("Done with multiprocessing of files (supposedly)")
     write_handler.terminate() 

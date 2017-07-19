@@ -119,9 +119,9 @@ class RawacfRecord(object):
         tf = self.end_dt.isoformat()
         cmd = self.cmd_name + " " + self.cmd_args
         string = "Record: from {0} to {1}\tCPID: {2}\n".format(t0, tf, self.cpid)
-        string += "Origin Cmd: {0}\tNave status: {1}".format(cmd, self.nave_pos)
+        string += "Origin Cmd: {0}\tNave status: {1}".format(cmd, self.min_nave)
         string += "\tConsistent dT: {0}".format(self.times_consistent)
-        string += "\tTransmitting frequency: {0}".format(tfreq)
+        string += "\tTx freq min/max: {0}/{1}".format(self.min_tfreq, self.max_tfreq)
         return string
 
     def duration(self):
@@ -171,7 +171,7 @@ class RawacfRecord(object):
         :returns: RawacfRecord object constructed from tuple's fields
             
         """
-        assert(len(tup) == 11)
+        assert(len(tup) == 12)
         assert(tup[0] != None and tup[1] != None and tup[2] != None)
         stid, start_iso, end_iso = (tup[:3])
         cmd_name, cmd_args, cpid = (tup[3:6])
@@ -216,16 +216,15 @@ class RawacfRecord(object):
         else:
             cmd_name = cmd_spl[0]
             cmd_args = cmd_spl[1]
+        # If there were any 'inconsistency'-related objections, then we label the file as 'not_corrupt'=False
         for err_str in objection_dict.values():
+            not_corrupt = False 
             logging.debug(err_str)
 
         # ** Grab tfreq **
         tfreqs = [ d['tfreq'] for d in dmap_dicts ]
         min_tfreq = min(tfreqs)
         max_tfreq = max(tfreqs)
-
-        # Check for unusual N_ave values
-        # nave_pos = int(has_positive_nave(dmap_dicts))
 
         # ** Get the lowest n_ave value **
         min_nave = min([ d['nave'] for d in dmap_dicts ])
@@ -240,8 +239,6 @@ class RawacfRecord(object):
         for d in dmap_dicts:
             ts.append(reconstruct_datetime(d))
         diffs = [(ts[i+1] - ts[i]).total_seconds() for i in range( len(ts) - 1 )]
-        # logging.info(diffs)
-
         # Check that every difference between entries is 20 seconds or less
         times_consistent = int(( np.array(diffs) < CONSISTENT_RAWACF_THRESH ).all())
 
@@ -426,8 +423,11 @@ def check_fields(dmap_dicts):
                 objection_dict[field] = dbg_str
                 #raise InconsistentRawacfError(dbg_str)
         # Check if rsep corresponds to txpl
-        if (dmap_dict['txpl']*3/20) != dmap_dict['rsep']:
+        txpl = dmap_dict['txpl']
+        rsep = dmap_dict['rsep']
+        if (txpl*3/20) != rsep:
             dbg_str = "Fields 'rsep' and 'txpl' are inconsistent with each other."
+            dbg_str += "\trsep: {0}, txpl: {1}".format(rsep, txpl)
             objection_dict['rsep'] = objection_dict['txpl'] = dbg_str
         # Check if bmnum is valid ?
         range_max = 16 if dmap_dict['stid'] in radars16.values() else 24

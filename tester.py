@@ -32,11 +32,11 @@ TEST_RAWACF = 'tests/sample_files/20170601.0001.00.sas.rawacf'
 TESTDB = "testdb.sqlite"
 
 test_dmap_dicts = [{'cp': 3, 'origin.command': 'test', 'stid': 5, 'txpl': 300,
-                    'rsep': 45, 'bmnum': 0},
+                    'rsep': 45, 'bmnum': 0, 'xcf': 1, 'tfreq': 11090},
                     {'cp': 3, 'origin.command': 'test', 'stid': 5, 'txpl': 300,
-                    'rsep': 45, 'bmnum': 0},
+                    'rsep': 45, 'bmnum': 0, 'xcf': 1, 'tfreq': 14090},
                     {'cp': 3, 'origin.command': 'test', 'stid': 5, 'txpl': 300,
-                    'rsep': 45, 'bmnum': 0}]
+                    'rsep': 45, 'bmnum': 0, 'xcf': 1, 'tfreq': 11090}]
 
 sample_start_iso = "2017-07-18T15:00:37.245704" 
 sample_end_iso = "2017-07-18T15:30:00"
@@ -328,8 +328,8 @@ if __name__=="__main__":
     rut.globus_connect()
     if 'tests' not in os.listdir(UPTIME_ROOT_DIR):
         subprocess.call('mkdir {0}'.format(TESTS_DIR))
-        subprocess.call('mkdir {0}/endpt'.format(TESTS_DIR))
-    rut.ENDPOINT =  "{0}/endpt".format(UPTIME_ROOT_DIR)
+        subprocess.call('mkdir {0}/endpoint'.format(TESTS_DIR))
+    rut.ENDPOINT =  "{0}/endpoint".format(TESTS_DIR)
     conn = rut.connect_db()
     cur = conn.cursor()
    

@@ -68,9 +68,8 @@ class RawacfRecord(object):
                 file (note: CPIDs and cmd_names should match eachother)
         - cmd_args : string containing the command-line args supplied when
                     running this command
-        - nave_pos : boolean flag stating whether or not the 'n_ave'
-                        parameter in the .rawacf file is consistently 
-                        positive (if it were 0 or -, there'd be an issue)
+        - min_nave : the minimum value of n_ave in the .rawacf file
+                    (entries of <= 0 indicate failure to retrieve data)
         - times_consistent : boolean flag stating that the time difference
                         between entries in the .rawacf are small and 
                         consistent (if not, there was downtime during)
@@ -79,7 +78,9 @@ class RawacfRecord(object):
                 * This is needed to indicate to uptime.parse_rawacf_folder()
                   when there's been non-critical exceptions raised in creating
                   a RawacfRecord instance (indicates if there were problems)*
-
+        - min_tfreq: lowest transmitting frequency used in this record
+        - max_tfreq: highest transmitting frequency used in this record
+        - xcf: ??
 
     *** METHODS ***
         - Constructor (8 parameters)
@@ -92,7 +93,8 @@ class RawacfRecord(object):
                 list of dict (dmap records) originating from a .rawacf file
     """
     def __init__(self, stid, start_dt, end_dt, cmd_name="", cmd_args="", cpid=0,
-                 nave_pos=True, times_consistent=True, not_corrupt=True):
+                 min_nave=0, times_consistent=True, not_corrupt=True,
+                 min_tfreq=0., max_tfreq=0., xcf=0.):
         """
         Self-explanatory constructor method.
         """
@@ -102,9 +104,12 @@ class RawacfRecord(object):
         self.cpid = cpid
         self.cmd_name = cmd_name
         self.cmd_args = cmd_args 
-        self.nave_pos = nave_pos
+        self.min_nave = min_nave
         self.times_consistent = times_consistent
         self.not_corrupt = not_corrupt
+        self.min_tfreq = min_tfreq
+        self.max_tfreq = max_tfreq
+        self.xcf = xcf
 
     def __repr__(self):
         """
@@ -116,6 +121,7 @@ class RawacfRecord(object):
         string = "Record: from {0} to {1}\tCPID: {2}\n".format(t0, tf, self.cpid)
         string += "Origin Cmd: {0}\tNave status: {1}".format(cmd, self.nave_pos)
         string += "\tConsistent dT: {0}".format(self.times_consistent)
+        string += "\tTransmitting frequency: {0}".format(tfreq)
         return string
 
     def duration(self):
@@ -139,11 +145,13 @@ class RawacfRecord(object):
         end_time = (self.end_dt).isoformat()
         try:
             cur.execute('''INSERT INTO exps (stid, start_iso, end_iso, 
-            cmd_name, cmd_args, cpid, nave_pos, times_consistent) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+            cmd_name, cmd_args, cpid, min_nave, times_consistent, not_corrupt,
+            min_tfreq, max_tfreq, xcf) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
             (self.stid, start_time, end_time, 
             self.cmd_name, self.cmd_args, self.cpid,
-            int(self.nave_pos), int(self.times_consistent)))
+            int(self.min_nave), int(self.times_consistent), 
+            int(self.not_corrupt), self.min_tfreq, self.max_tfreq, self.xcf))
         except sqlite3.IntegrityError:
             logging.error("Unique constraint failed or something.")     
         except sqlite3.OperationalError: 
@@ -163,16 +171,19 @@ class RawacfRecord(object):
         :returns: RawacfRecord object constructed from tuple's fields
             
         """
-        assert(len(tup) == 8)
+        assert(len(tup) == 11)
         assert(tup[0] != None and tup[1] != None and tup[2] != None)
         stid, start_iso, end_iso = (tup[:3])
         cmd_name, cmd_args, cpid = (tup[3:6])
-        nave_pos, times_consistent = (tup[-2:])
+        min_nave, times_consistent, not_corrupt = (tup[6:9])
+        min_tfreq, max_tfreq, xcf = (tup[-3:])
         start_dt = iso_to_dt(start_iso)
         end_dt = iso_to_dt(end_iso)
         # Use contents of tuple as arguments for RawacfRecord constructor
         return cls(stid, start_dt, end_dt, cmd_name=cmd_name, cmd_args=cmd_args,
-                cpid=cpid, nave_pos=nave_pos, times_consistent=times_consistent)
+                cpid=cpid, min_nave=min_nave, times_consistent=times_consistent,
+                not_corrupt=not_corrupt, min_tfreq=min_tfreq, 
+                max_tfreq=max_tfreq, xcf=xcf)
 
     # Class method for making a RawacfRecord from a dicts from a .rawacf file
     @classmethod
@@ -197,6 +208,7 @@ class RawacfRecord(object):
         cpid = dmap_dicts[0]['cp'] if 'cp' not in objection_dict else -1
         stid = dmap_dicts[0]['stid'] if 'stid' not in objection_dict else -1
         cmd  = dmap_dicts[0]['origin.command'] if 'origin.command' not in objection_dict else -1
+        xcf = dmap_dicts[0]['xcf'] if 'xcf' not in objection_dict else -1
         cmd_spl =  cmd.split(' ',1)
         if len(cmd_spl)==1:
             cmd_name = cmd
@@ -206,14 +218,23 @@ class RawacfRecord(object):
             cmd_args = cmd_spl[1]
         for err_str in objection_dict.values():
             logging.debug(err_str)
+
+        # ** Grab tfreq **
+        tfreqs = [ d['tfreq'] for d in dmap_dicts ]
+        min_tfreq = min(tfreqs)
+        max_tfreq = max(tfreqs)
+
+        # Check for unusual N_ave values
+        # nave_pos = int(has_positive_nave(dmap_dicts))
+
+        # ** Get the lowest n_ave value **
+        min_nave = min([ d['nave'] for d in dmap_dicts ])
+        print("min, max tfreq: {0}, {1}\nmin n_ave:{2}".format(min_tfreq, max_tfreq, min_nave))
  
         # Parse the start/end temporal fields 
         start_dt = reconstruct_datetime(dmap_dicts[0])
         end_dt = reconstruct_datetime(dmap_dicts[-1])
-               
-        # Check for unusual N_ave values
-        nave_pos = int(has_positive_nave(dmap_dicts))
-    
+         
         # Check for downtime during the experiment's run
         ts = []
         for d in dmap_dicts:
@@ -227,8 +248,9 @@ class RawacfRecord(object):
         if 'not_corrupt' not in locals():
             not_corrupt = True
         return cls(stid, start_dt, end_dt, cmd_name=cmd_name, cmd_args=cmd_args,
-                    cpid=cpid, nave_pos=nave_pos, times_consistent=times_consistent, 
-                    not_corrupt=not_corrupt)
+                    cpid=cpid, min_nave=min_nave, times_consistent=times_consistent, 
+                    not_corrupt=not_corrupt, min_tfreq=min_tfreq, 
+                    max_tfreq=max_tfreq, xcf=xcf)
 
 # -----------------------------------------------------------------------------
 #                               Utility Methods 
@@ -394,7 +416,7 @@ def check_fields(dmap_dicts):
     objection_dict = dict()
     for i, dmap_dict in enumerate(dmap_dicts):
         # Check if some fields are consistent throughout
-        for field in ['cp', 'origin.command', 'stid']: 
+        for field in ['cp', 'origin.command', 'stid', 'xcf']: 
             val = dmap_dict[field]
             first_val = dmap_dicts[0][field]
             if first_val != val:
@@ -538,17 +560,21 @@ def connect_db(dbname="superdarntimes.sqlite"):
                 file (note: CPIDs and cmd_names should match eachother)
     - cmd_args : string containing the command-line args supplied when
                 running this command
-    - nave_pos : boolean flag stating whether or not the 'n_ave'
-                    parameter in the .rawacf file is consistently 
-                    positive (if it were 0 or -, there'd be an issue)
+    - min_nave : the smallest value of the 'n_ave' parameter
+                    (if it's were 0 or -, there's be an issue)
     - times_consistent : boolean flag stating that the time difference
                         between entries in the .rawacf are small and 
                         consistent (if not, there was downtime during)
+    - not_corrupt : flag associated with records that are identified to have
+                    unexpected or possibly corrupted data
+    - min_tfreq:
+    - max_tfreq:
+    - xcf:
 
-    *** nave_pos and times_consistent are currently stored as integers
+
+    *** not_corrupt and times_consistent are currently stored as integers
     expected to only take on values of "1" or "0" ***
     """
-    #TODO:  maybe should check that it has the right structure?
     
     conn = sqlite3.connect(dbname)
     cur = conn.cursor()
@@ -560,8 +586,12 @@ def connect_db(dbname="superdarntimes.sqlite"):
     cmd_name text,
     cmd_args text,
     cpid integer,
-    nave_pos BOOLEAN,
+    min_nave integer,
     times_consistent BOOLEAN,
+    not_corrupt BOOLEAN,
+    min_tfreq integer,
+    max_tfreq integer,
+    xcf integer,
     PRIMARY KEY (stid, start_iso)
     );
     """) 
@@ -577,7 +607,8 @@ def check_db(cur):
     # And if it *did* exist, make sure it has all the necessary fields:
     cur.execute('PRAGMA table_info (exps)')
     flds = ['stid', 'start_iso', 'end_iso', 'cmd_name', 'cmd_args', 'cpid', 
-            'nave_pos', 'times_consistent']
+            'min_nave', 'times_consistent', 'not_corrupt', 'min_tfreq',
+            'max_tfreq', 'xcf']
     tbl_flds = [ en[1] for en in cur.fetchall() ]
     db_correct = True
     for f in flds:
@@ -591,7 +622,7 @@ def clear_db(cur):
     """
     cur.executescript("""
     DROP TABLE IF EXISTS exps;
-    
+
     CREATE TABLE IF NOT EXISTS exps (
     stid integer NOT NULL,
     start_iso text NOT NULL,
@@ -599,12 +630,16 @@ def clear_db(cur):
     cmd_name text,
     cmd_args text,
     cpid integer,
-    nave_pos BOOLEAN,
+    min_nave integer,
     times_consistent BOOLEAN,
+    not_corrupt BOOLEAN,
+    min_tfreq integer,
+    max_tfreq integer,
+    xcf integer,
     PRIMARY KEY (stid, start_iso)
     );
     """) 
-
+   
 def process_experiment(dics, conn):
     """
     Takes a dmap-based list of dicts 'dics' for a SuperDARN experiment
@@ -649,4 +684,6 @@ if __name__ == "__main__":
             conn = connect_db()
             cur = conn.cursor()
 
-
+    conn = connect_db()
+    cur = conn.cursor()
+    

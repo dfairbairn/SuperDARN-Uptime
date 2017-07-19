@@ -224,7 +224,8 @@ def process_file(fname, conn=sqlite3.connect("superdarntimes.sqlite")):
         logging.warning(err_str.format(index, fname, e))
     write_handler.terminate()
     curr = conn.cursor()
-    r.save_to_db(curr) 
+    r.save_to_db(curr)
+    conn.commit() 
     return r
 
 def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite")):

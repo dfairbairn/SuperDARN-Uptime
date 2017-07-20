@@ -24,7 +24,8 @@ sys.path.insert(0, os.path.abspath('../../'))
 # -- General configuration ------------------------------------------------
 
 # SECTION FOR MAKING 'MOCK' SQLITE SO RTD CAN BUILD
-from unittest.mock import MagicMock
+#from unittest.mock import MagicMock # only valid for Python3.3+
+from mock import Mock as MagicMock
 
 class Mock(MagicMock):
     @classmethod

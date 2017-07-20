@@ -1,7 +1,7 @@
 numpy
 python-dateutil
 cal
--e git+http://github.com/ghaering/pysqlite.git#egg=pysqlite
+pysqlite
 configparser
 multiprocessing
 -e git+http://github.com/SuperDARNCanada/backscatter.git#egg=backscatter

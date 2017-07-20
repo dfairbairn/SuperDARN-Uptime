@@ -1,3 +1,4 @@
+sphinx>=1.6.2
 numpy
 python-dateutil
 cal

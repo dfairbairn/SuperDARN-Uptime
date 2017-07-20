@@ -336,23 +336,23 @@ def exc_handler_func(exc_msg_queue):
             time.sleep(SHORT_SLEEP_INTERVAL)
         else:
             try:
-                logging.debug("Write handler received a message!")
+                logging.debug("\t\tWrite handler received a message!")
                 fname, exc = exc_msg_queue.get()
                 if isinstance(exc, rut.InconsistentRawacfError):
-                    logging.debug("Write handler saving a bad_cpid event")
+                    logging.debug("\t\tWrite handler saving a bad_cpid event")
                     write_inconsistent_rawacf(fname, exc)
                 elif isinstance(exc, backscatter.dmap.DmapDataError) or isinstance(exc, rut.BadRawacfError):
-                    logging.debug("Write handler saving a bad_rawacf event")
+                    logging.debug("\t\tWrite handler saving a bad_rawacf event")
                     write_bad_rawacf(fname, exc)
                 elif type(exc) == MemoryError:
-                    logging.error("Exception handler sees memory error", exc_info=True)
+                    logging.error("\t\tException handler sees memory error", exc_info=True)
                 else:
-                    err_str = "Handled miscellaneous 'other' exception: {0}"
+                    err_str = "\t\tHandled miscellaneous 'other' exception: {0}"
                     logging.debug(err_str.format(exc))
             except TypeError:
-                logging.error("Write handler had trouble unpacking message!", exc_info=True)
+                logging.error("\t\tWrite handler had trouble unpacking message!", exc_info=True)
             except IOError:
-                logging.error("Write handler had trouble writing!", exc_info=True)
+                logging.error("\t\tWrite handler had trouble writing!", exc_info=True)
 
 def write_inconsistent_rawacf(fname, exc, inconsistents_log=BAD_CPIDS_FILE):
     """

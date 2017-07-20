@@ -230,13 +230,18 @@ class RawacfRecord(object):
         min_nave = min([ d['nave'] for d in dmap_dicts ])
  
         # Parse the start/end temporal fields 
-        start_dt = reconstruct_datetime(dmap_dicts[0])
-        end_dt = reconstruct_datetime(dmap_dicts[-1])
-         
-        # Check for downtime during the experiment's run
-        ts = []
-        for d in dmap_dicts:
-            ts.append(reconstruct_datetime(d))
+        try:
+            start_dt = reconstruct_datetime(dmap_dicts[0])
+            end_dt = reconstruct_datetime(dmap_dicts[-1])
+             
+            # Check for downtime during the experiment's run
+            ts = []
+            for d in dmap_dicts:
+                ts.append(reconstruct_datetime(d))
+        except ValueError:
+            logging.error("Possible microsecond-related error.", exc_info=True)
+            err_str = "Microseconds in start and end dts: {0}, {1}"
+            logging.error(err_str.format(dmap_dicts[0]['time.us'], dmap_dicts[-1]['time.us']))
         diffs = [(ts[i+1] - ts[i]).total_seconds() for i in range( len(ts) - 1 )]
         # Check that every difference between entries is 20 seconds or less
         times_consistent = int(( np.array(diffs) < CONSISTENT_RAWACF_THRESH ).all())
@@ -396,7 +401,13 @@ def reconstruct_datetime(dic):
 
     :returns: time information in a python [Datetime] object
     """
-    logging.debug("Microseconds: {0}".format(dic['time.us']))
+    # There are a couple spurious cases of 0 or negative microseconds that 
+    # mess things up, so here I catch them and set them to 1us
+    if dic['time.us'] < 0 or dic['time.us'] > 999999 or type(dic['time.us']) != int:
+        err_str = "Microseconds value is : {0}".format(dic['time.us'])
+        err_str += "\t Setting it to 1 us before proceeding..."
+        logging.warning(err_str)
+        dic['time.us'] = 1
     t = dt(dic['time.yr'], dic['time.mo'], dic['time.dy'], dic['time.hr'], 
            dic['time.mt'], dic['time.sc'], dic['time.us']) 
     return t
@@ -420,7 +431,7 @@ def check_fields(dmap_dicts):
             first_val = dmap_dicts[0][field]
             if first_val != val:
                 # Current value of field is different from first value
-                dbg_str = "check_field() was seeing record of {0} for ".format(first_val)
+                dbg_str = "\t\tcheck_field() was seeing record of {0} for ".format(first_val)
                 dbg_str += "'{0}' but now sees {1} at index {2} of {3}".format(field, val, i, len(dmap_dicts))
                 objection_dict[field] = dbg_str
                 #raise InconsistentRawacfError(dbg_str)

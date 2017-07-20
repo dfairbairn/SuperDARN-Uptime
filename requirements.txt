@@ -3,4 +3,3 @@ python-dateutil
 cal
 configparser
 multiprocessing
--e git+http://github.com/SuperDARNCanada/backscatter.git#egg=backscatter

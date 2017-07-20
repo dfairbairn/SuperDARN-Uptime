@@ -228,7 +228,6 @@ class RawacfRecord(object):
 
         # ** Get the lowest n_ave value **
         min_nave = min([ d['nave'] for d in dmap_dicts ])
-        print("min, max tfreq: {0}, {1}\nmin n_ave:{2}".format(min_tfreq, max_tfreq, min_nave))
  
         # Parse the start/end temporal fields 
         start_dt = reconstruct_datetime(dmap_dicts[0])
@@ -305,11 +304,13 @@ def globus_connect():
     > subprocess.Popen([str(rut.GLOBUS_STARTUP_LOC), '-start', '&'])
     > subprocess.Popen([str(rut.GLOBUS_STARTUP_LOC), '-start', '&'], 
                         stdout=subprocess.PIPE)
+
     The above two python lines only produce <defunct> processes that don't 
     function as globus endpoints
 
     > subprocess.Popen([str(rut.GLOBUS_STARTUP_LOC), '-start', '&'], 
                         stdout=subprocess.PIPE, shell=True)
+
     The above line returns the help prompt from the globusconnect script (as 
     if no args were given)
     """
@@ -395,6 +396,7 @@ def reconstruct_datetime(dic):
 
     :returns: time information in a python [Datetime] object
     """
+    logging.debug("Microseconds: {0}".format(dic['time.us']))
     t = dt(dic['time.yr'], dic['time.mo'], dic['time.dy'], dic['time.hr'], 
            dic['time.mt'], dic['time.sc'], dic['time.us']) 
     return t

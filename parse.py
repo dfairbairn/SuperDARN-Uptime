@@ -112,7 +112,7 @@ def process_rawacfs_day(year, month, day, station_code=None, conn=None):
         logging.info("\t\tDone with clearing {0}-{1}-{2} rawacf data".format(
                  str(year), "{:02d}".format(month), "{:02d}".format(day)))
     except subprocess.CalledProcessError:
-        logging.error("\t\tUnable to remove files.")
+        logging.error("\t\tUnable to remove files.", exc_info=True)
     logging.info("Completed processing of requested day's rawacf data.")
  
 def process_rawacfs_month(year, month, conn=sqlite3.connect("superdarntimes.sqlite")):
@@ -161,39 +161,11 @@ def process_rawacfs_month(year, month, conn=sqlite3.connect("superdarntimes.sqli
             logging.info("\t\tDone with clearing {0}-{1}-{2} rawacf data".format(
                      str(year), "{:02d}".format(month), "{:02d}".format(day)))
         except subprocess.CalledProcessError:
-            logging.error("\t\tUnable to remove files.")
+            logging.error("\t\tUnable to remove files.", exc_info=True)
 
     logging.info("Completed processing of requested month's rawacf data.")
     return
         
-def test_process_rawacfs(conn=sqlite3.connect("superdarntimes.sqlite")):
-    """
-    This method exists specifically to test whether everything's 
-    configured properly to run the script to grab an entire month's data. 
-    It does everything that process_rawacfs_month does, but only a little bit.
-
-    :param conn: [sqlite3 connection] to the database
-    """
-    import subprocess
-
-    # Test 1: Globus query
-    rut.globus_connect()
-    script_query = [rut.SYNC_SCRIPT_LOC,'-y', '2017', '-m',
-        '02', '-p', '20170209.0*zho', rut.ENDPOINT]
-    rut.globus_query(script_query)
-
-    # Test 2: verify that we can parse this stuff
-    parse_rawacf_folder(rut.ENDPOINT, conn=conn )
-    logging.info("Done with parsing 2017-02-09 'sas' rawacf data")
-
-    # Test 3: Clear the rawacf files that we fetched
-    try:
-        rut.clear_endpoint()
-        logging.info("Successfully removed 2017-02-09 'sas' rawacf data")
-
-    except subprocess.CalledProcessError:
-        logging.error("\t\tUnable to remove files")
-
 def process_file(fname, conn=sqlite3.connect("superdarntimes.sqlite")):
     """
     Essentially a wrapper for using parse_file that handles some possible 
@@ -216,7 +188,7 @@ def process_file(fname, conn=sqlite3.connect("superdarntimes.sqlite")):
     except backscatter.dmap.DmapDataError as e:
         err_str = "\t{0} File: {1}: Error reading dmap from stream - possible record" + \
                   " corruption. Skipping file."
-        logging.error(err_str.format(index, fname))
+        logging.error(err_str.format(index, fname), exc_info=True)
         return
 
     except rut.InconsistentRawacfError as e:
@@ -306,13 +278,13 @@ def parse_file(path, fname, index, exc_msg_queue):
     except backscatter.dmap.DmapDataError as e:
         err_str = "\t{0} File: {1}: Error reading dmap from stream - possible record" + \
                   " corruption. Skipping file."
-        logging.error(err_str.format(index, fname))
+        logging.error(err_str.format(index, fname), exc_info=True)
         # Tell the write handler to add this to the list of bad rawacf files
         exc_msg_queue.put((fname, e))
         return None
 
     except MemoryError as e:
-        logging.error("\t{0} File: {1}: RAN OUT OF MEMORY.".format(index, fname))
+        logging.error("\t{0} File: {1}: RAN OUT OF MEMORY.".format(index, fname), exc_info=True)
         exc_msg_queue.put((fname, e))
         # 'Just do it again!'. I know its inelegant, but this occurs rarely...
         import time
@@ -373,15 +345,14 @@ def exc_handler_func(exc_msg_queue):
                     logging.debug("Write handler saving a bad_rawacf event")
                     write_bad_rawacf(fname, exc)
                 elif type(exc) == MemoryError:
-                    logging.debug("Exception handler sees memory error")
-                    # TODO: Find a way to restart the process that has the memory error
+                    logging.error("Exception handler sees memory error", exc_info=True)
                 else:
                     err_str = "Handled miscellaneous 'other' exception: {0}"
                     logging.debug(err_str.format(exc))
             except TypeError:
-                logging.error("Write handler had trouble unpacking message!")
+                logging.error("Write handler had trouble unpacking message!", exc_info=True)
             except IOError:
-                logging.error("Write handler had trouble writing!")
+                logging.error("Write handler had trouble writing!", exc_info=True)
 
 def write_inconsistent_rawacf(fname, exc, inconsistents_log=BAD_CPIDS_FILE):
     """
@@ -495,7 +466,7 @@ def initialize_logger(quiet_mode=False):
         datefmt='%m/%d/%Y %I:%M:%S %p')
  
     logFormatter = logging.Formatter('%(levelname)s %(asctime)s: %(message)s')
-    rootLogger = logging.getLogger()
+    rootLogger = logging.getLogger(__name__)
     rootLogger.setLevel(level)
 
     fileHandler = logging.FileHandler("./{0}".format(LOG_FILE))

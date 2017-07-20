@@ -61,10 +61,6 @@ And the specialized packages you'll need are:
 
 - backscatter (see here: 
 
-- a script for performing 
-
-Note to self - #TODO: Make a setup.py file
-
 Usage
 =====
 The files 'parse.py' and 'uptime.py' are written so as to be usable either

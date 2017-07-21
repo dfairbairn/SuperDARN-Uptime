@@ -28,6 +28,7 @@ logging.basicConfig(level=logging.DEBUG,
     datefmt='%m/%d/%Y %I:%M:%S %p')
 
 CONSISTENT_RAWACF_THRESH = 20
+
 radars16 = {'cly': 66, 'gbr': 1, 'han': 10, 'hok': 40, 'hkw': 41, 'inv': 64,
             'kap': 3, 'ksr': 16, 'kod': 7, 'lyr': 90, 'pyk': 9, 'pgr': 6, 
             'rkn': 65, 'sas': 5, 'sch': 2, 'sto': 8, 'dce': 96, 'fir': 21,

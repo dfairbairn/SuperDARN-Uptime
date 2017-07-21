@@ -35,31 +35,28 @@ SuperDARN record metadata to a database locally.
 have a Globus account with access to the SuperDARN Globus endpoints, with 
 Globus configured locally!** 
 
-See how to do this here: 
-https://github.com/SuperDARNCanada/globus
-
-To summarize, the regular ol' python packages you'll need are:
+To summarize, the regular ol' python packages you'll need are listed below. 
+They can be installed by running 'pip install -r docs/requirements.txt'.
 
 - numpy
 
-- sqlite3
+- sqlite3 (or 'pysqlite')
 
-- calendar
+- calendar (or 'cal')
 
-- dateutil
+- dateutil (or 'python-dateutil')
 
 - configparser
 
 - multiprocessing
 
-- argparse < built-in? >
-
-- logging < built-in? >
-
-
 And the specialized packages you'll need are:
 
-- backscatter (see here: 
+- backscatter (see here: https://github.com/SuperDARNCanada/backscatter )
+
+- globus (see here:  https://github.com/SuperDARNCanada/globus )
+
+
 
 Usage
 =====
@@ -128,18 +125,13 @@ Current Issues and Necessary Work
 =================================
 I) To massively improve the time it takes to perform parsing and processing of
 the .rawacf files, the multiprocessing package for python was used. However,
-it seems to possibly be causing database errors.
+it seems to possibly be causing errors. For now, sequential processing is 
+performed, which generally takes ~14 hours for one month's data to be analyzed.
 
 II) Some regular errors are frequently encountered in the execution of these
 scripts. Certain .rawacf files can't be parsed by *backscatter* so database
 entries for these records will be absent (when perhaps there was only a minor
 formatting error).
-
-III) Although I have a little python script I've used for testing, it's not
-very spiffed up and not currently a part of the repo.
-
-IV) I haven't actually set up the documentation very well yet so that it links
-to all the modules... 
 
 .. toctree::
    :maxdepth: 2

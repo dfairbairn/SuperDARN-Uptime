@@ -1,6 +1,10 @@
+# This is a requirements.txt file stored here specifically just to allow
+# ReadTheDocs to build documentation. It doesn't actually install everything
+# you need (use the requirements.txt file one directory up for that).
 sphinx>=1.6.2
 numpy
 python-dateutil
 cal
+#pysqlite
 configparser
 multiprocessing

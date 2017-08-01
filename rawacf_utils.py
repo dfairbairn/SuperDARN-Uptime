@@ -208,7 +208,7 @@ class RawacfRecord(object):
         objection_dict = check_fields(dmap_dicts)
         cpid = dmap_dicts[0]['cp'] if 'cp' not in objection_dict else -1
         stid = dmap_dicts[0]['stid'] if 'stid' not in objection_dict else -1
-        cmd  = dmap_dicts[0]['origin.command'] if 'origin.command' not in objection_dict else -1
+        cmd  = dmap_dicts[0]['origin.command'] if 'origin.command' not in objection_dict else "" 
         xcf = dmap_dicts[0]['xcf'] if 'xcf' not in objection_dict else -1
         cmd_spl =  cmd.split(' ',1)
         if len(cmd_spl)==1:
@@ -272,9 +272,9 @@ def bz2_dic(fname):
     """
     import bz2
     if not os.path.isfile(fname):
-        raise IOError('Not a file!')
+        raise IOError('Not a file! {0}'.format(fname))
     if fname[-4:] != '.bz2':
-        raise IOError('Not a .bz2 file!')
+        raise IOError('Not a .bz2 file! {0}'.format(fname))
     f = bz2.BZ2File(fname,'rb')
     stream = f.read()
     dics = backscatter.dmap.parse_dmap_format_from_stream(stream)
@@ -379,7 +379,9 @@ def read_config(cfg_file='config.ini'):
                 "HOMEF: /path/to/homefolder\n" +
                 "ENDPOINT: /path/to/globus_endpoint\n" +
                 "GLOBUS_STARTUP_LOC: /path/to/globus_startupscript_folder\n" +
-                "SYNC_SCRIPT_LOC: /path/to/kevins_globus_sync_script")
+                "SYNC_SCRIPT_LOC: /path/to/kevins_globus_sync_script\n" +
+                "# Include the actual filename of the 'globusconnect' and " +
+                "# 'sync_radar_data_globus.py' files.")
         return
     config = cps.ConfigParser()
     config.read_file(f)

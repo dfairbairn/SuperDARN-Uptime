@@ -35,8 +35,14 @@ SuperDARN record metadata to a database locally.
 have a Globus account with access to the SuperDARN Globus endpoints, with 
 Globus configured locally!** 
 
-To summarize, the regular ol' python packages you'll need are listed below. 
-They can be installed by running 'pip install -r docs/requirements.txt'.
+In terms of the necessary steps for installation:
+[1] 
+Get virtualenv and create a virtual environment, and activate it.
+> virtualenv uptime
+> source uptime/bin/activate
+
+[2] 
+The necessary python modules are listed below. 
 
 - numpy
 
@@ -50,12 +56,22 @@ They can be installed by running 'pip install -r docs/requirements.txt'.
 
 - multiprocessing
 
-And the specialized packages you'll need are:
+They can be installed by running: 
+> pip install -r docs/requirements.txt
+
+[3] 
+The specialized packages you'll need are:
 
 - backscatter (see here: https://github.com/SuperDARNCanada/backscatter )
+    * Note: this is already included in the requirements.txt file 
 
 - globus (see here:  https://github.com/SuperDARNCanada/globus )
+    * Note: this _must_ be downloaded deliberately, but it's okay 'cause it's easy
 
+[4]
+For parsing or fetching, you'll need a config file set-up which points to
+the location of the globus script from step 3. If you run rawacf_utils.read_config(),
+a 'sample_config.ini' file will be created which explains the structure required. 
 
 
 Usage

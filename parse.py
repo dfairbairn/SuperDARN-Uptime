@@ -35,6 +35,7 @@ import sqlite3
 import argparse
 import time
 import multiprocessing as mp
+import itertools
 
 import backscatter 
 import rawacf_utils as rut
@@ -223,7 +224,6 @@ def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite"),
     :param conn: [sqlite3 connection] to the database
     :param multiprocess: [Boolean] whether or not to use a multiprocessing pool
     """
-    import itertools
     assert(os.path.isdir(folder))
     cur = conn.cursor()
     logging.info("Acceptable path {0}. Analysis proceeding...".format(folder))
@@ -231,8 +231,9 @@ def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite"),
     processes = []
 
     # Start exception handler/write handler
-    manager = mp.Manager()
-    exc_msg_queue = manager.Queue()
+    # manager = mp.Manager()
+    # exc_msg_queue = manager.Queue()
+    exc_msg_queue = mp.Queue()
     write_handler = mp.Process(target=exc_handler_func, args=( exc_msg_queue,))
     write_handler.start()  
     
@@ -246,6 +247,7 @@ def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite"),
       
         # Set the pool to work
         logging.debug("Beginning a pool multiprocessing of the files...") 
+
         pool = mp.Pool(maxtasksperchild=2)
         recs = pool.map(parse_file_wrapper, arg_bundle)
            
@@ -258,7 +260,6 @@ def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite"),
             fname = os.path.basename(fil)
             r = parse_file(path, fname, i, exc_msg_queue)
             recs.append(r)
-    write_handler.terminate() 
     num_uncounted = 0
     for rec in recs:
         if rec is not None:
@@ -267,6 +268,8 @@ def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite"),
         else:
             num_uncounted += 1
             logging.debug("Found an instance of a None record!")
+
+    write_handler.terminate() 
 
     done_str = "Done with processing files in folder. {0} / {1} were saved to the database."
     logging.info(done_str.format(len(files) - num_uncounted, len(files))) 

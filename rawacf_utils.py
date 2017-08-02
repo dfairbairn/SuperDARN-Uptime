@@ -690,6 +690,38 @@ def dump_db(conn):
     cur.execute('delete from exps')
     conn.commit()
 
+def copy_db_entries(dbfname_src, dbfname_dest):
+    """
+    Copies entries from one sqlite database to another.
+
+    :param dbfname_src: [string] name of the _source_ sqlite database file
+    :param dbfname_dest: [string] name of the _destination_ sqlite database
+
+    """
+    src_db = sqlite3.connect(dbfname_src)
+    dest_db = sqlite3.connect(dbfname_dest) 
+    src_cur = src_db.cursor()
+    dest_cur = dest_db.cursor()
+    #query = "".join(line for line in src_db.iterdump())
+    #dest_db.executescript(query)
+
+    src_cur.execute('select * from exps')
+    fetches = src_cur.fetchall()
+    for entry_tuple in fetches:
+        try: 
+            logging.debug(entry_tuple)
+            dest_cur.execute('''INSERT INTO exps (stid, start_iso, end_iso, 
+                cmd_name, cmd_args, cpid, min_nave, times_consistent, not_corrupt,
+                min_tfreq, max_tfreq, xcf) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                entry_tuple)
+        except sqlite3.IntegrityError:
+            logging.error("Unique constraint failed or something.")     
+        except sqlite3.OperationalError: 
+            logging.error("\t\tDatabase locked - can't save metadata!")
+    dest_db.commit()
+    return src_db, dest_db 
+
 if __name__ == "__main__":
     read_config()         
 

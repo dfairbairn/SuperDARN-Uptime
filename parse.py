@@ -116,7 +116,7 @@ def process_rawacfs_day(year, month, day, station_code=None, conn=None):
     logging.info("Completed processing of requested day's rawacf data.")
  
 def process_rawacfs_month(year, month, conn=sqlite3.connect("superdarntimes.sqlite"),
-                         multiprocess=False):
+                         multiprocess=False, days=[]):
     """
     Takes starting month and year and ending month and year as arguments. Steps
     through each day in each year/month combo
@@ -124,6 +124,8 @@ def process_rawacfs_month(year, month, conn=sqlite3.connect("superdarntimes.sqli
     :param year: [int] indicating the year to look at
     :param month: [int] indicating the month to look at
     :param conn: [sqlite3 connection] to the database for saving to
+    :param multiprocess: [boolean] whether to use multiprocessing or not
+    :param days: [list of ints] an optional days subset for the month
 
     ** On Maxwell this has taken upwards of 14 hours to run for a given month **
 
@@ -131,17 +133,25 @@ def process_rawacfs_month(year, month, conn=sqlite3.connect("superdarntimes.sqli
     import subprocess
     import calendar 
 
+    last_day = calendar.monthrange(year, month)[1]
+    if type(days)==list and len(days) > 0: 
+        cond1 = all([ type(d)==int for d in days])
+        cond2 = all([ d in np.arange(1,last_day+1)])
+        if cond1 and cond2:
+            # Only now has the custom days range been fully validated
+            days_list = days
+    else:
+        days_list = np.arange(1,last_day+1)
+
     # I. Run the globus connect process
     rut.globus_connect()
 
     logging.info("Beginning to process Rawacf logs... ")
     
-    last_day = calendar.monthrange(year, month)[1]
     logging.info("Starting to analyze {0}-{1} files...".format(str(year), "{:02d}".format(month))) 
 
     # II. For each day in the month:
-    for day in np.arange(1,last_day+1):
-
+    for day in days_list:
         logging.info("\tLooking at {0}-{1}-{2}".format(
                      str(year), "{:02d}".format(month), "{:02d}".format(day)))
 
@@ -236,7 +246,7 @@ def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite"),
       
         # Set the pool to work
         logging.debug("Beginning a pool multiprocessing of the files...") 
-        pool = mp.Pool()
+        pool = mp.Pool(maxtasksperchild=2)
         recs = pool.map(parse_file_wrapper, arg_bundle)
            
         logging.debug("Done with multiprocessing of files (supposedly)")

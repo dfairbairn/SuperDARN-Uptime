@@ -559,6 +559,18 @@ def month_year_iterator(start_month, start_year, end_month, end_year):
         y, m = divmod(ym, 12)
         yield y, m + 1
 
+def get_stid(st_code):
+    """
+    Given a SuperDARN radar code, grab the STID
+    """
+    try:
+        stid = allradars[st_code]
+    except KeyError:
+        logging.error("No radar by that code")
+        stid = -1
+    return stid
+
+
 # -----------------------------------------------------------------------------
 #                              DB Methods 
 # -----------------------------------------------------------------------------

@@ -12,7 +12,7 @@ description:
 
     * Note *
     Two additional files are associated with the parsing performed on
-    .rawacf files. The files 'bad_rawacfs.txt' and 'inconsistent_fields.txt' are
+    .rawacf files. The files 'bad_rawacfs.txt' and 'bad_fields.txt' are
     created in the working directory after parsing runs that yield
     parsing errors. 
     
@@ -47,7 +47,7 @@ SUBPROC_JOIN_TIMEOUT = 15
 SHORT_SLEEP_INTERVAL = 0.1
 
 BAD_RAWACFS_FILE = './bad_rawacfs.txt'
-INCONSISTENT_FIELDS_FILE = './inconsistent_fields.txt'
+INCONSISTENT_FIELDS_FILE = './bad_fields.txt'
 LOG_FILE = 'parse.log'
 
 logging.basicConfig(level=logging.DEBUG,
@@ -356,7 +356,7 @@ def parse_file_wrapper(args):
   
 def exc_handler_func(exc_msg_queue):
     """
-    Function for doing the writing to bad_rawacfs.txt and inconsistent_fields.txt to 
+    Function for doing the writing to bad_rawacfs.txt and bad_fields.txt to 
     avoid race conditions between worker processes.
 
     :param exc_msg_queue: [multiprocessing.Queue] that provides a medium
@@ -388,7 +388,7 @@ def exc_handler_func(exc_msg_queue):
 
 def write_inconsistent_rawacf(fname, exc, inconsistents_log=INCONSISTENT_FIELDS_FILE):
     """
-    Performs the actual writing to the inconsistent_fields.txt file.
+    Performs the actual writing to the bad_fields.txt file.
 
     :param fname: [str] filename that had inconsistent fields in it
     :param exc: [rawacf_utils.BadRawacfError] exception object

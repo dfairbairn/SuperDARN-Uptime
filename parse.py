@@ -12,14 +12,16 @@ description:
 
     * Note *
     Two additional files are associated with the parsing performed on
-    .rawacf files. The files 'bad_rawacfs.txt' and 'bad_cpids.txt' are
+    .rawacf files. The files 'bad_rawacfs.txt' and 'inconsistent_fields.txt' are
     created in the working directory after parsing runs that yield
     parsing errors. 
     
     The latter file contains names of files which indicate inconsistent
-    readings of fields (which has thus far only been observed to occur
-    with the CPID field in 'han', 'zho', and 'hkw' radar .rawacfs. The
-    former file contains names of files which couldn't be read using
+    readings of fields (which is typically observed to occur with the CPID
+    field in 'han', 'zho', and 'hkw' radar .rawacfs, in addition to being
+    seen occasionally in the XCF field). 
+
+    The former file contains names of files which couldn't be read using
     the 'backscatter' library, as well as the exceptions they threw.
 
 author: David Fairbairn
@@ -45,7 +47,7 @@ SUBPROC_JOIN_TIMEOUT = 15
 SHORT_SLEEP_INTERVAL = 0.1
 
 BAD_RAWACFS_FILE = './bad_rawacfs.txt'
-BAD_CPIDS_FILE = './bad_cpids.txt'
+INCONSISTENT_FIELDS_FILE = './inconsistent_fields.txt'
 LOG_FILE = 'parse.log'
 
 logging.basicConfig(level=logging.DEBUG,
@@ -351,7 +353,7 @@ def parse_file_wrapper(args):
   
 def exc_handler_func(exc_msg_queue):
     """
-    Function for doing the writing to bad_rawacfs.txt and bad_cpids.txt to 
+    Function for doing the writing to bad_rawacfs.txt and inconsistent_fields.txt to 
     avoid race conditions between worker processes.
 
     :param exc_msg_queue: [multiprocessing.Queue] that provides a medium
@@ -381,14 +383,14 @@ def exc_handler_func(exc_msg_queue):
             except IOError:
                 logging.error("\t\tWrite handler had trouble writing!", exc_info=True)
 
-def write_inconsistent_rawacf(fname, exc, inconsistents_log=BAD_CPIDS_FILE):
+def write_inconsistent_rawacf(fname, exc, inconsistents_log=INCONSISTENT_FIELDS_FILE):
     """
-    Performs the actual writing to the bad_cpids.txt file.
+    Performs the actual writing to the inconsistent_fields.txt file.
 
     :param fname: [str] filename that had inconsistent fields in it
     :param exc: [rawacf_utils.BadRawacfError] exception object
     """
-    # ***ADD TO LIST OF BAD_CPIDS ***
+    # ***ADD TO LIST OF INCONSISTENT_FIELDS ***
     with open(inconsistents_log, 'a') as f:
         f.write(fname + ':' + str(exc) + '\n')
 

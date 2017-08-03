@@ -233,9 +233,8 @@ def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite"),
     processes = []
 
     # Start exception handler/write handler
-    # manager = mp.Manager()
-    # exc_msg_queue = manager.Queue()
-    exc_msg_queue = mp.Queue()
+    manager = mp.Manager()
+    exc_msg_queue = manager.Queue()
     write_handler = mp.Process(target=exc_handler_func, args=( exc_msg_queue,))
     write_handler.start()  
     

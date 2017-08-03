@@ -1,16 +1,18 @@
 #!/bin/bash
-# Script to be run overnight that will spin through a year's rawacf info..
+# Script to be run over several days that will spin through a year's rawacf info
 
 echo Enter a year whose data you would like processed...
-read year
+read YEAR 
 
-for month in `seq 1 12`;
+for MONTH in `seq 1 12`;
 do
-    echo $year-$month
-    ./parse.py -y $year -m $month
-    export archive=data/$year-$month
+    echo $YEAR-$MONTH
+    ./parse.py -y $YEAR -m $MONTH
+    export archive=data/$YEAR-$MONTH
     mkdir $archive
     mv *.log $archive/
     mv bad*.txt $archive/
     cp superdarntimes.sqlite $archive/
 done 
+
+mv superdarntimes.sqlite "$YEAR"data.sqlite

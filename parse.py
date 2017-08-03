@@ -246,12 +246,16 @@ def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite"),
       
         # Set the pool to work
         logging.debug("Beginning a pool multiprocessing of the files...") 
-
-        pool = mp.Pool(maxtasksperchild=2)
-        recs = pool.map(parse_file_wrapper, arg_bundle)
-           
-        logging.debug("Done with multiprocessing of files (supposedly)")
-    else:
+        
+        try:
+            pool = mp.Pool(maxtasksperchild=2)
+            recs = pool.map(parse_file_wrapper, arg_bundle)
+            logging.debug("Done with multiprocessing of files (supposedly)")
+        except Exception as e:
+            logging.error("\nUnsuccessful multiprocessing attempt. Continuing sequentially\n")
+            logging.exception(e)
+            multiprocess = False 
+    if multiprocess==False:
         # Sequential processing: iterate through, parsing each file 1-by-1
         recs = []
         for i, fil in enumerate(files):

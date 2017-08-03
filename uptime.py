@@ -298,9 +298,13 @@ if __name__ == "__main__":
         conn = rut.connect_db()
         cur = conn.cursor()
     stats = process_args(year, month, day, st_code, use_verbose, cur)
-    print("\nStatistics are shown below for selected period:")
-    for code in stats.keys():
-        stat = stats[code]
-        if type(stat)==list:
-            stat = np.mean(stat)
-        print("{0}: {1} % Uptime".format(code, stat))
+    if stats is not None:  
+        print("\nStatistics are shown below for selected period:")
+        if type(stats)==dict: 
+            for code in stats.keys():
+                stat = stats[code]
+                if type(stat)==list:
+                    stat = np.mean(stat)
+                print("{0}: {1} % Uptime".format(code, stat))
+        else:
+            print(stats)

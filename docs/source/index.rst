@@ -36,10 +36,15 @@ have a Globus account with access to the SuperDARN Globus endpoints, with
 Globus configured locally!** 
 
 In terms of the necessary steps for installation:
+
 [1] 
+
 Get virtualenv and create a virtual environment, and activate it.
+
 > virtualenv uptime
+
 > source uptime/bin/activate
+
 
 [2] 
 The necessary python modules are listed below. 
@@ -59,6 +64,7 @@ The necessary python modules are listed below.
 They can be installed by running: 
 > pip install -r docs/requirements.txt
 
+
 [3] 
 The specialized packages you'll need are:
 
@@ -67,6 +73,7 @@ The specialized packages you'll need are:
 
 - globus (see here:  https://github.com/SuperDARNCanada/globus )
     * Note: this _must_ be downloaded deliberately, but it's okay 'cause it's easy
+
 
 [4]
 For parsing or fetching, you'll need a config file set-up which points to

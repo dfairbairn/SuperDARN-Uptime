@@ -4,7 +4,7 @@
 echo Enter a year whose data you would like processed...
 read year
 
-for month in `seq 11 12`;
+for month in `seq 1 12`;
 do
     echo $year-$month
     ./parse.py -y $year -m $month

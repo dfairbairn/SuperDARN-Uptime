@@ -119,7 +119,7 @@ def process_rawacfs_day(year, month, day, station_code=None, conn=None):
     logging.info("Completed processing of requested day's rawacf data.")
  
 def process_rawacfs_month(year, month, conn=sqlite3.connect("superdarntimes.sqlite"),
-                         multiprocess=False, days=[]):
+                         multiprocess=True, days=[]):
     """
     Takes starting month and year and ending month and year as arguments. Steps
     through each day in each year/month combo
@@ -226,6 +226,7 @@ def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite"),
     :param conn: [sqlite3 connection] to the database
     :param multiprocess: [Boolean] whether or not to use a multiprocessing pool
     """
+    from contextlib import closing
     assert(os.path.isdir(folder))
     cur = conn.cursor()
     logging.info("Acceptable path {0}. Analysis proceeding...".format(folder))
@@ -250,8 +251,9 @@ def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite"),
         logging.debug("Beginning a pool multiprocessing of the files...") 
         
         try:
-            pool = mp.Pool(maxtasksperchild=2)
-            recs = pool.map(parse_file_wrapper, arg_bundle)
+            # Force python to garbage collect by using closing from context lib?
+            with closing(mp.Pool(maxtasksperchild=2)) as pool:
+                recs = pool.map(parse_file_wrapper, arg_bundle)
             logging.debug("Done with multiprocessing of files (supposedly)")
         except Exception as e:
             logging.error("\nUnsuccessful multiprocessing attempt. Continuing sequentially\n")

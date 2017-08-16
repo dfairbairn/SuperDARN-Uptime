@@ -228,6 +228,7 @@ def parse_rawacf_folder(folder, conn=sqlite3.connect("superdarntimes.sqlite"),
     """
     from contextlib import closing
     assert(os.path.isdir(folder))
+    conn.text_factory = str
     cur = conn.cursor()
     logging.info("Acceptable path {0}. Analysis proceeding...".format(folder))
 
@@ -524,5 +525,6 @@ if __name__ == "__main__":
 
     rut.read_config() 
     conn = rut.connect_db()
+    conn.text_factory = str
     cur = conn.cursor()
     process_args(year, month, day, st_code, directory, fname)

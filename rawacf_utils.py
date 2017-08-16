@@ -144,6 +144,8 @@ class RawacfRecord(object):
         """
         start_time = (self.start_dt).isoformat()
         end_time = (self.end_dt).isoformat()
+    
+
         try:
             cur.execute('''INSERT INTO exps (stid, start_iso, end_iso, 
             cmd_name, cmd_args, cpid, min_nave, times_consistent, not_corrupt,
@@ -217,7 +219,12 @@ class RawacfRecord(object):
         else:
             cmd_name = cmd_spl[0]
             cmd_args = cmd_spl[1]
-        # If there were any 'inconsistency'-related objections, then we label the file as 'not_corrupt'=False
+        # rare case of weird extended ascii characters getting in here, strip it out
+        cmd_name = str( cmd_name.decode('ascii', 'ignore') )
+        cmd_args = str( cmd_args.decode('ascii', 'ignore') )
+
+        # If there were any 'inconsistency'-related objections, 
+        # the we label the file as 'not_corrupt'=False
         for err_str in objection_dict.values():
             not_corrupt = False 
             logging.debug(err_str)
@@ -605,6 +612,7 @@ def connect_db(dbname="superdarntimes.sqlite"):
     """
     
     conn = sqlite3.connect(dbname)
+    conn.text_factory = str
     cur = conn.cursor()
     cur.executescript("""
     CREATE TABLE IF NOT EXISTS exps (
@@ -676,7 +684,12 @@ def process_experiment(dics, conn):
     """
     cur = conn.cursor()
     r = RawacfRecord.record_from_dics(dics)
-    r.save_to_db()
+    try:
+        r.save_to_db()
+    except Exception as e:
+        logging.error("Error thrown while trying to save to db!")
+        logging.exception(e)
+        logging.error("Contents of record: \n{0}".format(r))
     return r
 
 def select_exps(sql_select, cur):
@@ -718,7 +731,12 @@ def copy_db_entries(dbfname_src, dbfname_dest):
     #dest_db.executescript(query)
 
     src_cur.execute('select * from exps')
-    fetches = src_cur.fetchall()
+    try:
+        fetches = src_cur.fetchall()
+    except sqlite3.OperationalError as e:
+        logging.error("Failed to fetch an entry")
+        logging.exception(e)
+        sql = 'select stid, start_iso from exps where 
     for entry_tuple in fetches:
         try: 
             logging.debug(entry_tuple)

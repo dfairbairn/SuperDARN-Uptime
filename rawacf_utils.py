@@ -442,7 +442,7 @@ def check_fields(dmap_dicts):
             if first_val != val:
                 # Current value of field is different from first value
                 dbg_str = "\t\tcheck_field() was seeing record of {0} for ".format(first_val)
-                dbg_str += "'{0}' but now sees {1} at index {2} of {3}".format(field, val, i, len(dmap_dicts))
+                dbg_str += "'{0}' but now sees {1} at index {2} of {3}".format(field, val, i, len(dmap_dicts)-1)
                 objection_dict[field] = dbg_str
                 #raise InconsistentRawacfError(dbg_str)
         # Check if rsep corresponds to txpl
@@ -709,7 +709,7 @@ def select_exps(sql_select, cur):
 
 def dump_db(conn):
     """
-    Shows all the entries in the DB
+    Obliterates entries in the DB. Perhaps not that useful right now.
     """
     cur = conn.cursor()
     cur.execute('delete from exps')
@@ -736,7 +736,7 @@ def copy_db_entries(dbfname_src, dbfname_dest):
     except sqlite3.OperationalError as e:
         logging.error("Failed to fetch an entry")
         logging.exception(e)
-        sql = 'select stid, start_iso from exps where 
+        raise OperationalError(e)
     for entry_tuple in fetches:
         try: 
             logging.debug(entry_tuple)
@@ -758,7 +758,6 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         path = sys.argv[1]
         if os.path.isdir(path):
-            #clear_db() # whoa there buddy thats a bit rash
             conn = connect_db()
             cur = conn.cursor()
 

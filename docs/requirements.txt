@@ -6,4 +6,4 @@ pysqlite
 configparser
 multiprocessing
 -e git://github.com/superdarncanada/backscatter.git#egg=backscatter
-
+globus-sdk

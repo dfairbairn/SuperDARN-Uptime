@@ -60,6 +60,25 @@ def stats_month_summary(year, month, cur):
     print(averages)
     return stats, averages
 
+def stats_year_summary(year, cur):
+    """
+    Get stats from each radar's year, put means in a results dictionary and 
+    return an array.
+
+    :param
+    """
+    #TODO: params
+    stats = dict()
+    averages = dict()
+    radar_codes = rut.allradars.keys()
+    for code in radar_codes:
+        stats_list = stats_year(year, cur, code)
+        stats[code] = stats_list
+        averages[code] = np.mean(stats_list)
+    print(averages)
+    return stats, averages
+
+
 def do_forall_radars(func, arg_bundle):
     """
     Use this to return a dictionary of the results of stats_day or stats_month
@@ -152,6 +171,66 @@ def stats_month(year, month, cur, code=None):
     #print("{0}: {1} % Uptime".format(code, np.mean(day_stats)))
     return day_stats
 
+def stats_year(year, cur, code=None):
+    """
+    Calculates the uptime stats for the entire year
+    """
+    if code is None:
+        logging.warning("No station code given, proceeding with default, Saskatoon ('sas')")
+    
+    last_month = 12
+    months = np.arange(1, last_month + 1)
+    day_stats = []
+    for month in months:
+        last_day = calendar.monthrange(year, month)[1]
+        days = np.arange(1, last_day + 1)
+        for day in days:
+            day_stats.append(stats_day(year, month, day, cur, code))
+    return day_stats
+
+def stats_range(start_year, start_month, start_day, end_year, end_month, end_day, cur, code=None):
+    """ 
+    Calculates the uptime stats for a date range
+    """
+    if code is None:
+        logging.warning("No station code given, proceeding with default, Saskatoon ('sas')")
+    print("Working on radar {}".format(code))
+    day_stats = []
+    years = np.arange(start_year, end_year + 1)
+    for year in years:
+        print("Stats year: {}".format(year))
+        if year == end_year:
+            if start_year == end_year:
+                months = np.arange(start_month, end_month + 1)
+            else:
+                months = np.arange(1, end_month + 1)
+            for month in months:
+                print("Last year stats month: {}".format(month))
+                if month == end_month:
+                    if start_month == end_month and start_year == end_year:
+                        days = np.arange(start_day, end_day + 1)
+                    else:
+                        days = np.arange(1, end_day + 1)
+                    print("End month: {}. End day: {}".format(month, end_day))
+                else:
+                    last_day = calendar.monthrange(year, month)[1]
+                    days = np.arange(1, last_day + 1)
+                    print("End day: {}".format(last_day))
+                for day in days:
+                    s = stats_day(year, month, day ,cur, code)
+                    print(s)
+                    day_stats.append(s)
+        else:
+            months = np.arange(1, 13)
+            for month in months:
+                print("Stats month: {}".format(month))
+                last_day = calendar.monthrange(year, month)[1]
+                days = np.arange(1, last_day + 1)
+                for day in days:
+                    day_stats.append(stats_day(year, month, day, cur, code))
+    return day_stats
+    
+
 def stats_summary(cur):
     """
     Informational overview of timespan of entries in DB
@@ -214,7 +293,13 @@ def get_args():
                         type=int)
     parser.add_argument("-d", "--stats_day", help="Day you wish to get stats for",
                         type=int) 
-
+    parser.add_argument("-Y", "--end_year", help="Year in which range ends",
+                        type=int)
+    parser.add_argument("-M", "--end_month", help="Month in which range ends",
+                        type=int)
+    parser.add_argument("-D", "--end_day", help="Day in which range ends",
+                        type=int)
+     
     # For now, we require a particular station to be requested
     parser.add_argument("-c", "--station_code", 
                         help="SuperDARN Station code you want stats for (e.g. sas)",
@@ -233,9 +318,12 @@ def get_args():
     st_code = args.station_code
     use_verbose = args.verbose
     db_file = args.db_file
-    return (year, month, day, st_code, use_verbose, db_file)
+    end_year = args.end_year
+    end_month = args.end_month
+    end_day = args.end_day
+    return (year, month, day, st_code, use_verbose, db_file, end_year, end_month, end_day)
 
-def process_args(year, month, day, st_code, use_verbose, cur):
+def process_args(year, month, day, st_code, use_verbose, cur, end_year=None, end_month=None, end_day=None):
     """
     Encapsulates the necessary logic to decide what to do based on 
     command-line arguments.
@@ -246,8 +334,13 @@ def process_args(year, month, day, st_code, use_verbose, cur):
     else:
         logging.info("Verbosity set medium!")
         initialize_logger(use_verbose)
-
-    if day is not None:
+    
+    if end_year is not None:
+        if st_code is not None:
+            stats = stats_range(year, month, day, end_year, end_month, end_day, cur, st_code)
+        else:
+            stats = do_forall_radars(stats_range, (year, month, day, end_year, end_month, end_day, cur))
+    elif day is not None:
         if st_code is not None:
             stats = stats_day(year, month, day, cur, st_code)
         else:
@@ -259,6 +352,11 @@ def process_args(year, month, day, st_code, use_verbose, cur):
         else:
             stats = do_forall_radars(stats_month, (year, month, cur))
 #            stats = stats_month_summary(year, month, cur)
+    elif year is not None:
+        if st_code is not None:
+            stats = stats_year(year, cur, st_code)
+        else:
+            stats = do_forall_radars(stats_year, (year, cur))
     else:
         stats = stats_summary(cur)
     return stats
@@ -286,7 +384,7 @@ def initialize_logger(use_verbose):
 #------------------------------------------------------------------------------ 
 
 if __name__ == "__main__":
-    year, month, day, st_code, use_verbose, db_file = get_args()
+    year, month, day, st_code, use_verbose, db_file, end_year, end_month, end_day = get_args()
     initialize_logger(use_verbose)        
     rut.read_config()
     if db_file is not None:
@@ -297,7 +395,7 @@ if __name__ == "__main__":
         logging.info("Going with default database 'superdarntimes.sqlite'")
         conn = rut.connect_db()
         cur = conn.cursor()
-    stats = process_args(year, month, day, st_code, use_verbose, cur)
+    stats = process_args(year, month, day, st_code, use_verbose, cur, end_year, end_month, end_day)
     if stats is not None:  
         print("\nStatistics are shown below for selected period:")
         if type(stats)==dict: 
